@@ -19,8 +19,10 @@ Contact / support inbox: **veylixbim@gmail.com**. Customers write here, and ever
    | --- | --- |
    | `ADMIN_PASSWORD` | your admin password |
    | `GMAIL_APP_PASSWORD` | a Gmail **App Password** for veylixbim@gmail.com (see [Email](#email)) |
+   | `CRON_SECRET` | any long random text — protects the daily renewal-reminder emails |
 4. **Deployments → Redeploy** so the new variables are picked up.
 5. Open `https://<your-site>/admin`, sign in, and add your first plugin.
+6. In **Admin → Settings → Two-step sign-in**, turn it on with an authenticator app and keep the recovery codes safe.
 
 > The password is **not** in the code: this repository is public, so secrets only live in Vercel.
 > Because the password was shared in a chat, change it once from **Admin → Settings → Admin password**.
@@ -38,7 +40,7 @@ Contact / support inbox: **veylixbim@gmail.com**. Customers write here, and ever
 | **Inbox** | Messages from the website's contact forms. Reply from the panel; the message is also forwarded to Gmail. |
 | **Customers** | Everyone who gave an email address: buyers, trial users, newsletter sign-ups and people who wrote in. Email any of them, copy all addresses for BCC, or export CSV. |
 | **Design library** | All the original VEYLIX illustrations and animations: product line-art, icon badges, logo (static and animated), hero circuit traces, command-palette terminal, panel schedule, floor plan, before/after slider, counters, marquee. Replay them and download them as **SVG** (animated or still) or **PNG**. |
-| **Settings** | License check interval (default 30 days), free-trial length and on/off, InstaPay number and name, VAT, email status and a test email, admin password, the license public key. |
+| **Settings** | License check interval (default 30 days), free-trial length and on/off, renewal grace (default 3 days), InstaPay number and name, VAT, email status and a test email, **two-step sign-in**, admin password, the license public key. |
 
 ### Email
 
@@ -62,17 +64,28 @@ and the Email button offers to open the message in Gmail instead.
 
 ## How licensing works
 
+> The complete A–Z reference — every case (buying twice, moving PCs, reinstalling Windows, trials, late
+> renewals, offline, clock changes…), what the customer sees, what you can do, and the test that proves it — is in
+> **[docs/SECURITY-AND-LICENSING.md](docs/SECURITY-AND-LICENSING.md)**.
+
 1. **Buying:** the customer pays by InstaPay to **01100444395** and enters the transfer reference. You confirm
    the payment in **Orders**, and a product key (`VLX-XXXX-XXXX-XXXX-XXXX`) is issued.
 2. **Downloading:** `/download` asks for the product key. Only a valid key for that plugin unlocks the installer.
 3. **Activating inside Revit:** the first command asks for the key. The server **locks the key to that PC**
-   and returns a license **signed with an RSA-2048 private key** that never leaves your database.
-4. **Monthly re-check:** the license is valid for the **check interval** (30 days by default, editable in
+   (a hardware ID made from hashed SMBIOS UUID, board serial, CPU ID, Windows ID, drive serial and MAC
+   addresses — a Windows reinstall or new network card keeps the license, another PC doesn't) and returns a
+   license **signed with an RSA-2048 private key** that never leaves your database. A PC can hold **one working
+   license per plugin**: a second key for the same plugin is refused on it, and checkout stops customers from
+   paying twice.
+4. **Monthly renewal:** a key bought monthly ends after a month. Reminder emails go out 7, 3 and 1 days before;
+   renewing (checkout → "Renewing an existing license?" → same key) adds a month from the old end date. A
+   3-day grace period (editable) covers late InstaPay renewals.
+5. **Monthly re-check:** the license is valid for the **check interval** (30 days by default, editable in
    Settings, and per key in Manage). When it runs out, the plugin asks for the key again. The time remaining
    is shown in the status window, and a reminder appears when less than 3 days are left.
-5. **Free trial:** `/trial` issues a trial key. The trial clock (editable in Settings) starts at first activation,
+6. **Free trial:** `/trial` issues a trial key. The trial clock (editable in Settings) starts at first activation,
    and each PC gets one trial per plugin.
-6. **Changes reach the PC:** while Revit is online, the plugin checks the server every 6 hours.
+7. **Changes reach the PC:** while Revit is online, the plugin checks the server every 6 hours.
    Revoking a key, resetting its PC, shortening the interval or "ask for key now" all apply without a plugin update.
 
 ### Adding licensing to a plugin
@@ -105,9 +118,12 @@ is verified against real server licenses.
 - **Brute force is throttled.** Activation, status, download, trial, checkout and contact endpoints are rate-limited.
   Admin sign-in locks out after 5 wrong passwords for 15 minutes.
 - **Admin:**
-  - The password is stored hashed (scrypt).
-  - Sessions are signed httpOnly cookies, and changing the password signs out every session.
+  - The password is stored hashed (scrypt); two-step sign-in (authenticator app + recovery codes) is built in.
+  - Sessions are signed `__Host-` cookies (HttpOnly, Secure, SameSite=Strict), and changing the password signs
+    out every session.
   - Uploads are limited to signed-in admins from the same site.
+- **Website:** strict security headers (CSP, HSTS, no framing), rate limits on every public form, and CSV exports
+  safe against spreadsheet formulas.
 - **Installers** are only handed out for a valid key. Your source code is excluded from uploaded folders by default.
 
 No client-side licensing is impossible to crack: someone determined can patch a .NET DLL to skip the check.

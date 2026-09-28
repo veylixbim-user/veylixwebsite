@@ -22,7 +22,7 @@ function Status({ state }: { state: ActionState }) {
   return null;
 }
 
-export function SettingsForm({ initial }: { initial: { activationDays: number; trialDays: number; trialsEnabled: boolean; vatRate: number; instapayNumber: string; instapayName: string } }) {
+export function SettingsForm({ initial }: { initial: { activationDays: number; trialDays: number; renewalGraceDays: number; trialsEnabled: boolean; vatRate: number; instapayNumber: string; instapayName: string } }) {
   const [state, action, pending] = useActionState<ActionState, FormData>(saveSettingsAction, undefined);
   return (
     <form action={action} className="grid gap-5">
@@ -32,6 +32,9 @@ export function SettingsForm({ initial }: { initial: { activationDays: number; t
         </Field>
         <Field label="Free trial length (days)" htmlFor="trialDays" hint="Counted from the first activation in Revit">
           <Input id="trialDays" name="trialDays" inputMode="numeric" defaultValue={initial.trialDays} dir="ltr" />
+        </Field>
+        <Field label="Renewal grace (days)" htmlFor="renewalGraceDays" hint="A paid license keeps working this many days after its end date, so a late InstaPay renewal doesn't cut the customer off (0–30)">
+          <Input id="renewalGraceDays" name="renewalGraceDays" inputMode="numeric" defaultValue={initial.renewalGraceDays} dir="ltr" />
         </Field>
         <Field label="InstaPay number or address" htmlFor="instapayNumber">
           <Input id="instapayNumber" name="instapayNumber" defaultValue={initial.instapayNumber} dir="ltr" />

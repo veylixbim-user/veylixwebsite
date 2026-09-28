@@ -337,6 +337,12 @@ export const en = {
     secure: "We confirm every transfer by hand before issuing keys. We never ask for card details.",
     terms: "By placing the order you agree to the Terms of Service and the License Agreement.",
     empty: "Your cart is empty — add a plugin to check out.",
+    owned: {
+      title: "You already own this plugin",
+      body: "An active license for {products} is already registered to this email. Extend it instead, or confirm that this purchase is for another PC.",
+      renew: "Renew my current license instead",
+      anotherPc: "This is for another PC — place order",
+    },
     errors: {
       name: "Enter your full name.",
       email: "Enter a valid email address.",
@@ -345,6 +351,10 @@ export const en = {
       taxId: "Tax registration number must be 9 digits.",
       paymentRef: "Enter the InstaPay transfer reference.",
       renewKey: "This key can't be renewed here. Check it, and renew one license at a time.",
+      renewKeyForever: "This key never expires, so it doesn't need renewing.",
+      renewKeyProduct: "This key is for a different plugin. Put the matching plugin in your cart to renew it.",
+      paymentRefUsed: "This InstaPay reference was already used for another order. Each transfer pays for one order.",
+      device_licensed: "This PC already has a working license for this plugin. To extend it, tick \"Renewing an existing license?\" and enter your key.",
       rate_limited: "Too many attempts. Please wait a few minutes.",
       generic: "Something went wrong. Please try again.",
     },
@@ -538,7 +548,7 @@ export const en = {
         title: "Terms of Service",
         sections: [
           { h: "Agreement", p: "These terms govern your use of the VEYLIX website and software. By buying a product key or starting a trial you agree to them." },
-          { h: "Product keys", p: "Each product key is for one PC. You are responsible for keeping your keys private. Shared or resold keys may be disabled." },
+          { h: "Product keys", p: "Each product key is for one PC, and a PC can hold one working license per plugin. Monthly and yearly licenses end on the date shown on your order; renew before then to keep the same key (a short grace period applies). You are responsible for keeping your keys private. Shared or resold keys may be disabled." },
           { h: "Payment", p: "Prices are in Egyptian Pounds. Orders are confirmed after we verify your InstaPay transfer. VAT, where applicable, is shown at checkout." },
           { h: "Acceptable use", p: "You may not reverse-engineer, crack, resell or share the software or license keys, or use them to build a competing product." },
           { h: "Liability", p: "VEYLIX assists engineering work; it does not replace professional engineering judgment. Final designs must be reviewed and approved by a qualified engineer." },
@@ -548,7 +558,7 @@ export const en = {
       privacy: {
         title: "Privacy Policy",
         sections: [
-          { h: "What we collect", p: "Your name, email, phone and, if you ask for a tax invoice, company details. For licensing: your product key, an anonymous ID of your PC and its name." },
+          { h: "What we collect", p: "Your name, email, phone and, if you ask for a tax invoice, company details. For licensing: your product key, your PC's name and one-way hashes of hardware identifiers (motherboard ID, CPU ID, Windows installation ID, drive serial and network adapter addresses). The raw values never leave your PC and can't be recovered from the hashes." },
           { h: "What we never collect", p: "Your Revit models, project data or drawings. Plugins process everything locally." },
           { h: "How we use it", p: "To confirm payments, deliver keys, check licenses and provide support. We do not sell personal data." },
           { h: "Your rights", p: "You can ask to see, correct or delete your personal data at any time by emailing support." },

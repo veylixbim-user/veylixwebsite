@@ -5,10 +5,12 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { query } from "./db";
 import { getSetting, sessionSecret, setSetting } from "./settings";
+import { mfaEnabled, verifyMfa } from "./totp";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number, opts: { N: number; r: number; p: number; maxmem: number }) => Promise<Buffer>;
 
-export const ADMIN_COOKIE = "vx_admin";
+// "__Host-" cookies can only be set over HTTPS, for this exact host and path — no subdomain can overwrite them.
+export const ADMIN_COOKIE = process.env.NODE_ENV === "production" ? "__Host-vx_admin" : "vx_admin";
 const SESSION_HOURS = 12;
 const MAX_FAILURES = 5;
 const LOCK_MINUTES = 15;
@@ -39,7 +41,7 @@ export async function passwordConfigured() {
   return Boolean((await getSetting("admin_password_hash")) || process.env.ADMIN_PASSWORD);
 }
 
-async function checkPassword(password: string) {
+export async function checkPassword(password: string) {
   const stored = await getSetting("admin_password_hash");
   if (stored) return verifyHash(password, stored);
   const env = process.env.ADMIN_PASSWORD;
@@ -85,7 +87,7 @@ function signSession(expires: number, key: string) {
   return createHmac("sha256", key).update(`admin.${expires}`).digest("base64url");
 }
 
-export async function login(password: string): Promise<{ ok: true } | { ok: false; error: string }> {
+export async function login(password: string, code?: string): Promise<{ ok: true } | { ok: false; error?: string; needCode?: boolean }> {
   const ip = await clientIp();
   const locked = await lockedUntil(ip);
   if (locked) return { ok: false, error: `Too many attempts. Try again after ${locked.toISOString().slice(11, 16)} UTC.` };
@@ -94,13 +96,20 @@ export async function login(password: string): Promise<{ ok: true } | { ok: fals
     await recordFailure(ip);
     return { ok: false, error: "Wrong password." };
   }
+  if (await mfaEnabled()) {
+    if (!code?.trim()) return { ok: false, needCode: true };
+    if (!(await verifyMfa(code))) {
+      await recordFailure(ip); // wrong codes count towards the same lockout
+      return { ok: false, needCode: true, error: "That code didn't work. Use the current 6-digit code from your authenticator app, or a recovery code." };
+    }
+  }
   await query("DELETE FROM login_attempts WHERE ip = $1", [ip]);
   const expires = Date.now() + SESSION_HOURS * 3_600_000;
   const store = await cookies();
   store.set(ADMIN_COOKIE, `${expires}.${signSession(expires, await sessionKey())}`, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+    sameSite: "strict",
     path: "/",
     expires: new Date(expires),
   });

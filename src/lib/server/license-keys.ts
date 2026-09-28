@@ -1,6 +1,7 @@
 import "server-only";
 import { createSign } from "node:crypto";
 import { query, transaction, type Queryable } from "./db";
+import { candidatePatterns, formatComponents, parseComponents, sameHardware } from "./hardware";
 import { licenseKey, normalizeKey } from "./ids";
 import { getSettings, licenseKeyPair } from "./settings";
 
@@ -21,6 +22,11 @@ export type LicenseKey = {
   orderId: string | null;
   deviceId: string | null;
   deviceName: string | null;
+  deviceComponents: string | null;
+  /** Times the key followed its PC through a hardware change (Windows reinstall, new network card…). */
+  hwChanges: number;
+  hwWindowStart: Date | null;
+  hwWindowCount: number;
   activatedAt: Date | null;
   lastCheckAt: Date | null;
   expiresAt: Date | null;
@@ -44,6 +50,10 @@ type KeyRow = {
   order_id: string | null;
   device_id: string | null;
   device_name: string | null;
+  device_components: string | null;
+  hw_changes: number | null;
+  hw_window_start: Date | null;
+  hw_window_count: number | null;
   activated_at: Date | null;
   last_check_at: Date | null;
   expires_at: Date | null;
@@ -77,6 +87,10 @@ function map(r: KeyRow): LicenseKey {
     orderId: r.order_id,
     deviceId: r.device_id,
     deviceName: r.device_name,
+    deviceComponents: r.device_components,
+    hwChanges: r.hw_changes ?? 0,
+    hwWindowStart: d(r.hw_window_start),
+    hwWindowCount: r.hw_window_count ?? 0,
     activatedAt: d(r.activated_at),
     lastCheckAt: d(r.last_check_at),
     expiresAt: d(r.expires_at),
@@ -241,7 +255,10 @@ export async function updateKey(id: number, u: KeyUpdate) {
     case "restore":
       return query("UPDATE license_keys SET revoked = false WHERE id = $1", [id]);
     case "reset-device":
-      return query("UPDATE license_keys SET device_id = NULL, device_name = NULL, last_check_at = NULL WHERE id = $1", [id]);
+      return query(
+        "UPDATE license_keys SET device_id = NULL, device_name = NULL, device_components = NULL, last_check_at = NULL, hw_window_start = NULL, hw_window_count = 0 WHERE id = $1",
+        [id],
+      );
     case "force-recheck":
       return query("UPDATE license_keys SET last_check_at = to_timestamp(0) WHERE id = $1 AND last_check_at IS NOT NULL", [id]);
     case "delete":
@@ -269,14 +286,49 @@ export async function logActivity(kind: string, data: { keyId?: number | null; p
 /* Download + activation                                               */
 /* ------------------------------------------------------------------ */
 
-export type LicenseError = "invalid_key" | "revoked" | "expired" | "wrong_product" | "device_mismatch" | "not_activated" | "trial_used";
+export type LicenseError =
+  | "invalid_key"
+  | "revoked"
+  | "expired"
+  | "wrong_product"
+  | "device_mismatch"
+  | "not_activated"
+  | "trial_used"
+  | "trial_not_eligible"
+  | "already_licensed"
+  | "hw_limit";
+
+/** A paid renewal the customer has submitted keeps the license alive this long while the admin checks the transfer. */
+export const PENDING_PAYMENT_DAYS = 7;
+/** Hardware changes a key may follow automatically within HW_WINDOW_DAYS before support must reset it. */
+export const HW_CHANGE_LIMIT = 3;
+const HW_WINDOW_DAYS = 30;
+
+/**
+ * The moment a key stops working: its end date plus the renewal grace period, extended while a renewal
+ * payment submitted in time is waiting for approval. null = never ends.
+ */
+export function effectiveEnd(key: Pick<LicenseKey, "expiresAt" | "trial">, graceDays: number, pendingSince?: Date | null): Date | null {
+  if (!key.expiresAt) return null;
+  // Trials end exactly on time; paid keys get the grace period.
+  let end = key.expiresAt.getTime() + (key.trial ? 0 : graceDays * DAY_MS);
+  if (!key.trial && pendingSince && pendingSince.getTime() <= end) end = Math.max(end, pendingSince.getTime() + PENDING_PAYMENT_DAYS * DAY_MS);
+  return new Date(end);
+}
+
+async function pendingRenewalSince(db: Queryable, key: string): Promise<Date | null> {
+  const rows = await db.query<{ since: Date | null }>("SELECT min(created_at) AS since FROM orders WHERE status = 'pending' AND renew_key = $1", [key]);
+  return rows[0]?.since ? new Date(rows[0].since) : null;
+}
 
 /** Checks whether a key may download a given product (does not bind a device). */
 export async function authorizeDownload(value: string, productId: string): Promise<{ ok: true; key: LicenseKey } | { ok: false; error: LicenseError }> {
   const key = await getKey(value);
   if (!key) return { ok: false, error: "invalid_key" };
   if (key.revoked) return { ok: false, error: "revoked" };
-  if (key.expiresAt && key.expiresAt.getTime() < Date.now()) return { ok: false, error: "expired" };
+  const { renewalGraceDays } = await getSettings();
+  const end = effectiveEnd(key, renewalGraceDays, key.trial ? null : await pendingRenewalSince({ query }, key.key));
+  if (end && end.getTime() < Date.now()) return { ok: false, error: "expired" };
   if (key.productId && key.productId !== productId) return { ok: false, error: "wrong_product" };
   await query("UPDATE license_keys SET downloads = downloads + 1 WHERE id = $1", [key.id]);
   return { ok: true, key };
@@ -290,15 +342,11 @@ export type LicenseGrant = {
   issuedAt: Date;
   validUntil: Date;
   expiresAt: Date | null;
+  renewDue: Date | null;
   checkIntervalDays: number;
   payload: string;
   signature: string;
 };
-
-function validUntilFor(key: LicenseKey, days: number, from: Date) {
-  const until = from.getTime() + days * DAY_MS;
-  return new Date(key.expiresAt ? Math.min(until, key.expiresAt.getTime()) : until);
-}
 
 async function sign(payload: string) {
   const { privateKey } = await licenseKeyPair();
@@ -307,23 +355,48 @@ async function sign(payload: string) {
   return signer.sign(privateKey, "base64");
 }
 
-async function grantFor(key: LicenseKey, deviceId: string, lastCheck: Date, nonce: string, settings: { activationDays: number }): Promise<LicenseGrant> {
+async function grantFor(
+  key: LicenseKey,
+  device: { id: string; components: string },
+  lastCheck: Date,
+  nonce: string,
+  settings: { activationDays: number; renewalGraceDays: number },
+  pendingSince: Date | null,
+): Promise<LicenseGrant> {
   const days = key.activationDays ?? settings.activationDays;
   const issuedAt = new Date();
-  const validUntil = validUntilFor(key, days, lastCheck);
+  const hardStop = effectiveEnd(key, settings.renewalGraceDays, pendingSince);
+  const nextCheck = lastCheck.getTime() + days * DAY_MS;
+  const validUntil = new Date(hardStop ? Math.min(nextCheck, hardStop.getTime()) : nextCheck);
   const scope = key.productSlug ?? "*";
   const unix = (dt: Date | null) => (dt ? Math.floor(dt.getTime() / 1000) : 0);
-  // Pipe-separated so the Revit plugin can verify it without a JSON library. The client nonce makes every
-  // response single-use: a recorded reply can't be replayed to the plugin later.
-  const payload = ["VLX1", key.key, deviceId, scope, unix(validUntil), unix(issuedAt), unix(key.expiresAt), days, key.trial ? 1 : 0, nonce].join("|");
+  // Pipe-separated so the Revit plugin can verify it without a JSON library:
+  //   VLX1|key|deviceId|scope|validUntil|issuedAt|hardStop|checkDays|trial|nonce|components|renewDue
+  // The client nonce makes every response single-use, so a recorded reply can't be replayed later. The
+  // hardware components let the plugin recognise its own PC offline after small hardware changes.
+  const payload = [
+    "VLX1",
+    key.key,
+    device.id,
+    scope,
+    unix(validUntil),
+    unix(issuedAt),
+    unix(hardStop),
+    days,
+    key.trial ? 1 : 0,
+    nonce,
+    device.components,
+    unix(key.expiresAt),
+  ].join("|");
   return {
     key: key.key,
-    deviceId,
+    deviceId: device.id,
     scope,
     productName: key.productName,
     issuedAt,
     validUntil,
-    expiresAt: key.expiresAt,
+    expiresAt: hardStop,
+    renewDue: key.expiresAt,
     checkIntervalDays: days,
     payload,
     signature: await sign(payload),
@@ -333,71 +406,149 @@ async function grantFor(key: LicenseKey, deviceId: string, lastCheck: Date, nonc
 const DEVICE_RE = /^[A-Za-z0-9._:\-]{8,128}$/;
 const NONCE_RE = /^[A-Za-z0-9]{0,64}$/;
 
-function checkUsable(key: LicenseKey | null, productSlug?: string | null): LicenseError | null {
+function checkUsable(key: LicenseKey | null, productSlug: string | null | undefined, end: Date | null): LicenseError | null {
   if (!key) return "invalid_key";
   if (key.revoked) return "revoked";
-  if (key.expiresAt && key.expiresAt.getTime() < Date.now()) return "expired";
+  if (end && end.getTime() < Date.now()) return "expired";
   if (productSlug && key.productSlug && key.productSlug !== productSlug) return "wrong_product";
   return null;
 }
 
+type DeviceInput = { id: string; components: string };
+
+/** Same PC? Exact device ID, or enough hardware signals in common (see hardware.ts). */
+function isSameDevice(key: Pick<LicenseKey, "deviceId" | "deviceComponents">, device: DeviceInput) {
+  if (!key.deviceId) return false;
+  return key.deviceId === device.id || sameHardware(key.deviceComponents, device.components);
+}
+
+/** Other keys ever bound to this PC (exact ID or matching hardware), excluding `excludeId`. */
+async function keysOnDevice(db: Queryable, device: DeviceInput, excludeId: number): Promise<LicenseKey[]> {
+  const rows = await db.query<KeyRow>(
+    `${SELECT} WHERE k.id <> $1 AND k.device_id IS NOT NULL AND (k.device_id = $2 OR k.device_components LIKE ANY($3::text[])) ORDER BY k.id LIMIT 500`,
+    [excludeId, device.id, candidatePatterns(device.components)],
+  );
+  return rows.map(map).filter((k) => isSameDevice(k, device));
+}
+
+const covers = (k: LicenseKey, productSlug: string | null | undefined, productId: string | null) =>
+  k.productId === null || (productSlug ? k.productSlug === productSlug : productId === null || k.productId === productId);
+
 /**
- * Activation = the user typing the key inside Revit. Binds the key to the first device that uses it and
- * starts a new check period (settings.activationDays, or the key's own override).
+ * Activation = the user typing the key inside Revit. Binds the key to the first PC that uses it and starts
+ * a new check period (settings.activationDays, or the key's own override). Rules:
+ *   - one key = one PC (hardware changes on that PC are followed automatically, up to HW_CHANGE_LIMIT a month);
+ *   - one working paid license per product per PC: a second key for the same plugin can't be used on it;
+ *   - one free trial per PC per product, and no trial on a PC that already had a paid license for it.
  */
-export async function activate(input: { key: string; deviceId: string; deviceName?: string; product?: string | null; nonce?: string; ip?: string | null }) {
+export async function activate(input: {
+  key: string;
+  deviceId: string;
+  deviceName?: string;
+  components?: string;
+  product?: string | null;
+  nonce?: string;
+  ip?: string | null;
+}) {
   const nonce = input.nonce ?? "";
   if (!DEVICE_RE.test(input.deviceId) || !NONCE_RE.test(nonce)) return { ok: false as const, error: "invalid_key" as LicenseError };
   const value = normalizeKey(input.key);
-  const deviceName = (input.deviceName ?? "").slice(0, 100) || null;
+  const deviceName = (input.deviceName ?? "").replace(/[\r\n|]/g, " ").slice(0, 100) || null;
+  const device: DeviceInput = { id: input.deviceId, components: formatComponents(parseComponents(input.components)) };
   // Load settings and the signing key before the transaction: on the single-connection dev database a
   // query issued outside the open transaction would wait on it forever.
   const [settings] = await Promise.all([getSettings(), licenseKeyPair()]);
 
   return transaction(async (tx) => {
+    const fail = (error: LicenseError) => ({ ok: false as const, error });
     const rows = await tx.query<KeyRow>(`${SELECT} WHERE k.key = $1 FOR UPDATE OF k`, [value]);
     const key = rows[0] ? map(rows[0]) : null;
-    const error = checkUsable(key, input.product);
-    if (error || !key) return { ok: false as const, error: error ?? ("invalid_key" as LicenseError) };
-    if (key.deviceId && key.deviceId !== input.deviceId) return { ok: false as const, error: "device_mismatch" as LicenseError };
+    if (!key) return fail("invalid_key");
+    const pending = key.trial ? null : await pendingRenewalSince(tx, key.key);
+    const error = checkUsable(key, input.product, effectiveEnd(key, settings.renewalGraceDays, pending));
+    if (error) return fail(error);
 
     const now = new Date();
-    let expiresAt = key.expiresAt;
-    if (key.trial && !key.deviceId) {
-      // One trial per device and product.
-      const used = await tx.query(
-        "SELECT 1 FROM license_keys WHERE trial = true AND device_id = $1 AND product_id IS NOT DISTINCT FROM $2 AND id <> $3 LIMIT 1",
-        [input.deviceId, key.productId, key.id],
+    let hwChanged = false;
+    if (key.deviceId && key.deviceId !== device.id) {
+      if (!sameHardware(key.deviceComponents, device.components)) return fail("device_mismatch");
+      // Same PC after a hardware change. Follow it, but not endlessly: frequent "changes" mean the key is
+      // being passed between PCs.
+      const windowOpen = key.hwWindowStart && now.getTime() - key.hwWindowStart.getTime() < HW_WINDOW_DAYS * DAY_MS;
+      if (windowOpen && key.hwWindowCount >= HW_CHANGE_LIMIT) {
+        await tx.query("INSERT INTO activity (kind, key_id, product_id, detail, ip) VALUES ('hw-limit', $1, $2, $3, $4)", [key.id, key.productId, deviceName, input.ip ?? null]);
+        return fail("hw_limit");
+      }
+      hwChanged = true;
+      await tx.query(
+        `UPDATE license_keys SET hw_changes = hw_changes + 1,
+           hw_window_start = CASE WHEN $2::boolean THEN hw_window_start ELSE $3 END,
+           hw_window_count = CASE WHEN $2::boolean THEN hw_window_count + 1 ELSE 1 END
+         WHERE id = $1`,
+        [key.id, Boolean(windowOpen), now],
       );
-      if (used.length > 0) return { ok: false as const, error: "trial_used" as LicenseError };
-      // The trial clock starts at first activation, not when the key was issued.
-      if (!expiresAt) {
-        const days = key.trialDays ?? settings.trialDays;
-        expiresAt = new Date(now.getTime() + days * DAY_MS);
+    }
+
+    let expiresAt = key.expiresAt;
+    if (!key.deviceId) {
+      // First activation of this key: enforce the per-PC rules against every other key used on this PC.
+      const others = (await keysOnDevice(tx, device, key.id)).filter((k) => covers(k, input.product, key.productId));
+      if (key.trial) {
+        if (others.some((k) => !k.trial)) return fail("trial_not_eligible");
+        if (others.some((k) => k.trial)) return fail("trial_used");
+        // The trial clock starts at first activation, not when the key was issued.
+        if (!expiresAt) expiresAt = new Date(now.getTime() + (key.trialDays ?? settings.trialDays) * DAY_MS);
+      } else {
+        const working = others.filter((k) => !k.trial && !k.revoked && !isPast(effectiveEnd(k, settings.renewalGraceDays)));
+        if (working.length > 0) {
+          await tx.query("INSERT INTO activity (kind, key_id, product_id, detail, ip) VALUES ('duplicate-blocked', $1, $2, $3, $4)", [
+            key.id,
+            key.productId,
+            `PC already licensed by ${working[0].key}`,
+            input.ip ?? null,
+          ]);
+          return fail("already_licensed");
+        }
       }
     }
+
     await tx.query(
-      `UPDATE license_keys SET device_id = $2, device_name = COALESCE($3, device_name), activated_at = COALESCE(activated_at, $4), last_check_at = $4, expires_at = $5 WHERE id = $1`,
-      [key.id, input.deviceId, deviceName, now, expiresAt],
+      `UPDATE license_keys SET device_id = $2, device_name = COALESCE($3, device_name), device_components = COALESCE(NULLIF($4, ''), device_components),
+         activated_at = COALESCE(activated_at, $5), last_check_at = $5, expires_at = $6 WHERE id = $1`,
+      [key.id, device.id, deviceName, device.components, now, expiresAt],
     );
-    await tx.query("INSERT INTO activity (kind, key_id, product_id, detail, ip) VALUES ('activate', $1, $2, $3, $4)", [key.id, key.productId, deviceName, input.ip ?? null]);
-    return { ok: true as const, grant: await grantFor({ ...key, deviceId: input.deviceId, expiresAt }, input.deviceId, now, nonce, settings) };
+    await tx.query("INSERT INTO activity (kind, key_id, product_id, detail, ip) VALUES ($1, $2, $3, $4, $5)", [
+      hwChanged ? "hw-change" : "activate",
+      key.id,
+      key.productId,
+      deviceName,
+      input.ip ?? null,
+    ]);
+    return {
+      ok: true as const,
+      grant: await grantFor({ ...key, deviceId: device.id, expiresAt }, device, now, nonce, settings, pending),
+    };
   });
 }
+
+const isPast = (d: Date | null) => Boolean(d && d.getTime() < Date.now());
 
 /**
  * Status check the plugin makes when online. Does NOT extend the period — it returns the current,
  * re-signed period so admin changes (shorter interval, force re-check, revoke, device reset) take effect.
  */
-export async function licenseStatus(input: { key: string; deviceId: string; product?: string | null; nonce?: string }) {
+export async function licenseStatus(input: { key: string; deviceId: string; components?: string; product?: string | null; nonce?: string }) {
   const nonce = input.nonce ?? "";
   if (!DEVICE_RE.test(input.deviceId) || !NONCE_RE.test(nonce)) return { ok: false as const, error: "invalid_key" as LicenseError };
-  const key = await getKey(input.key);
-  const error = checkUsable(key, input.product);
+  const device: DeviceInput = { id: input.deviceId, components: formatComponents(parseComponents(input.components)) };
+  const [key, settings] = await Promise.all([getKey(input.key), getSettings()]);
+  const pending = key && !key.trial ? await pendingRenewalSince({ query }, key.key) : null;
+  const error = checkUsable(key, input.product, key ? effectiveEnd(key, settings.renewalGraceDays, pending) : null);
   if (error || !key) return { ok: false as const, error: error ?? ("invalid_key" as LicenseError) };
   if (!key.deviceId || !key.lastCheckAt) return { ok: false as const, error: "not_activated" as LicenseError };
-  if (key.deviceId !== input.deviceId) return { ok: false as const, error: "device_mismatch" as LicenseError };
-  return { ok: true as const, grant: await grantFor(key, input.deviceId, key.lastCheckAt, nonce, await getSettings()) };
+  // A hardware change is only accepted by entering the key again (activation), which is rate-limited and counted.
+  if (!isSameDevice(key, device)) return { ok: false as const, error: "device_mismatch" as LicenseError };
+  return { ok: true as const, grant: await grantFor(key, device, key.lastCheckAt, nonce, settings, pending) };
 }
 
 /** Public key formats for embedding in the Revit plugin. */
@@ -425,4 +576,19 @@ export async function issueTrialKey(input: { email: string; name: string; produc
     `Trial · ${input.name}`.slice(0, 200),
   ]);
   return { key, reused: false };
+}
+
+/**
+ * Paid keys that still work (not revoked, not past end date + grace) covering any of `productIds`, found by
+ * the customer's email or by the PC they were activated on. Used by checkout to stop duplicate purchases.
+ */
+export async function workingPaidKeys(by: { email?: string; deviceId?: string }, productIds: string[]): Promise<LicenseKey[]> {
+  if (!by.email && !by.deviceId) return [];
+  const settings = await getSettings();
+  const rows = await query<KeyRow>(
+    `${SELECT} WHERE NOT k.revoked AND NOT k.trial AND (k.product_id IS NULL OR k.product_id = ANY($1::text[]))
+       AND (${by.email ? "lower(k.assigned_to) = lower($2)" : "k.device_id = $2"}) ORDER BY k.id LIMIT 50`,
+    [productIds, by.email ?? by.deviceId],
+  );
+  return rows.map(map).filter((k) => !isPast(effectiveEnd(k, settings.renewalGraceDays)));
 }

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Download, Search } from "lucide-react";
-import { keyStats, listKeys, type KeyFilter, type LicenseKey } from "@/lib/server/license-keys";
+import { effectiveEnd, keyStats, listKeys, type KeyFilter, type LicenseKey } from "@/lib/server/license-keys";
 import { listProducts } from "@/lib/server/products";
 import { getSettings } from "@/lib/server/settings";
 import { AdminHeader } from "@/components/admin/page-header";
@@ -20,10 +20,11 @@ const STATUS_STYLE: Record<string, "default" | "accent" | "success" | "violet"> 
   revoked: "default",
 };
 
-function validUntil(k: LicenseKey, defaultDays: number) {
+function validUntil(k: LicenseKey, defaultDays: number, graceDays: number) {
   if (!k.lastCheckAt) return null;
   const until = k.lastCheckAt.getTime() + (k.activationDays ?? defaultDays) * 86_400_000;
-  return new Date(k.expiresAt ? Math.min(until, k.expiresAt.getTime()) : until);
+  const end = effectiveEnd(k, graceDays);
+  return new Date(end ? Math.min(until, end.getTime()) : until);
 }
 
 export default async function KeysPage({ searchParams }: PageProps<"/admin/keys">) {
@@ -138,7 +139,7 @@ export default async function KeysPage({ searchParams }: PageProps<"/admin/keys"
               </tr>
             ) : (
               keys.map((k) => {
-                const until = validUntil(k, settings.activationDays);
+                const until = validUntil(k, settings.activationDays, settings.renewalGraceDays);
                 const view: KeyView = {
                   id: k.id,
                   key: k.key,
@@ -156,6 +157,9 @@ export default async function KeysPage({ searchParams }: PageProps<"/admin/keys"
                   expiresAt: k.expiresAt?.toISOString() ?? null,
                   activationDays: k.activationDays,
                   downloads: k.downloads,
+                  hwChanges: k.hwChanges,
+                  hwRecent: k.hwWindowStart && now - k.hwWindowStart.getTime() < 30 * 86_400_000 ? k.hwWindowCount : 0,
+                  hwSignals: k.deviceComponents ? k.deviceComponents.split(",").length : 0,
                 };
                 const days = until ? Math.ceil((until.getTime() - now) / 86_400_000) : null;
                 return (
@@ -172,6 +176,11 @@ export default async function KeysPage({ searchParams }: PageProps<"/admin/keys"
                         {k.trial ? (
                           <Badge size="sm" variant="accent">
                             trial
+                          </Badge>
+                        ) : null}
+                        {view.hwRecent >= 2 ? (
+                          <Badge size="sm" variant="default" className="text-warning" title="The key followed several hardware changes this month — check it isn't being shared">
+                            moved {view.hwRecent}×
                           </Badge>
                         ) : null}
                       </span>

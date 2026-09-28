@@ -25,3 +25,4 @@ npm-debug.log*
 
 # local data (embedded database + uploads)
 /.data/
+/tests/e2e/.out/

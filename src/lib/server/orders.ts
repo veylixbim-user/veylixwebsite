@@ -186,6 +186,9 @@ function addPeriod(from: Date, billing: Billing) {
  * for the paid period. A renewal key (if the customer entered one) is extended instead.
  */
 export async function approveOrder(id: string) {
+  // Read settings before the transaction (the single-connection dev database would deadlock inside it).
+  const { renewalGraceDays } = await getSettings();
+  const graceMs = renewalGraceDays * 86_400_000;
   return transaction(async (tx) => {
     const rows = await tx.query<OrderRow>("SELECT * FROM orders WHERE id = $1 FOR UPDATE", [id]);
     if (!rows[0]) return null;
@@ -207,9 +210,13 @@ export async function approveOrder(id: string) {
           );
           const k = existing[0];
           if (k && !k.revoked && (k.product_id === null || k.product_id === item.productId)) {
-            const base = k.expires_at && new Date(k.expires_at).getTime() > now.getTime() ? new Date(k.expires_at) : now;
+            // Paid on time (before the end date + grace)? Extend from the old end date, so a month is always a
+            // month. Paid after the license lapsed? The new month starts on the day of payment.
+            const paidAt = new Date(order.createdAt).getTime();
+            const end = k.expires_at ? new Date(k.expires_at).getTime() : null;
+            const base = new Date(end !== null && paidAt <= end + graceMs ? end : paidAt);
             const newExpiry = addPeriod(base, item.billing);
-            await tx.query("UPDATE license_keys SET expires_at = $2, order_id = $3, assigned_to = COALESCE(assigned_to, $4) WHERE id = $1", [k.id, newExpiry, order.id, order.customer.email]);
+            await tx.query("UPDATE license_keys SET expires_at = $2, order_id = $3, assigned_to = COALESCE(assigned_to, $4), trial = false WHERE id = $1", [k.id, newExpiry, order.id, order.customer.email]);
             issued.push({ key: k.key, productName: item.name, expiresAt: newExpiry.toISOString(), renewed: true });
             renewUsed = true;
             continue;

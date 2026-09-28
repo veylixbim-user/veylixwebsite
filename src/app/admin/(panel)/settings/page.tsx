@@ -3,12 +3,14 @@ import { publicKeyFormats } from "@/lib/server/license-keys";
 import { isBlobEnabled } from "@/lib/server/storage";
 import { AdminHeader, Card } from "@/components/admin/page-header";
 import { PasswordForm, SettingsForm, TestEmailButton } from "@/components/admin/settings-forms";
+import { MfaSettings } from "@/components/admin/mfa-settings";
+import { mfaBypassed, mfaEnabled, recoveryCodesLeft } from "@/lib/server/totp";
 import { mailProvider } from "@/lib/server/mail";
 import { CONTACT_EMAIL } from "@/lib/site";
 import { CopyButton } from "@/components/admin/copy-button";
 
 export default async function SettingsPage() {
-  const [settings, keys] = await Promise.all([getSettings(), publicKeyFormats()]);
+  const [settings, keys, mfaOn, recoveryLeft] = await Promise.all([getSettings(), publicKeyFormats(), mfaEnabled(), recoveryCodesLeft()]);
   const provider = mailProvider();
   const dbKind = process.env.DATABASE_URL || process.env.POSTGRES_URL ? "Postgres" : "Local embedded database (development)";
 
@@ -58,6 +60,15 @@ export default async function SettingsPage() {
           )}
           <div className="mt-4">
             <TestEmailButton />
+          </div>
+        </Card>
+
+        <Card>
+          <h2 id="two-step" className="scroll-mt-24 font-semibold">
+            Two-step sign-in
+          </h2>
+          <div className="mt-3">
+            <MfaSettings enabled={mfaOn} bypassed={mfaBypassed()} recoveryLeft={recoveryLeft} />
           </div>
         </Card>
 

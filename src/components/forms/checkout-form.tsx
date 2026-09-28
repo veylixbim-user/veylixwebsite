@@ -18,6 +18,15 @@ import { ProductThumb } from "@/components/brand/product-thumb";
 import { CopyInline } from "@/components/forms/copy-inline";
 import { useCart, useUI } from "@/components/providers/site-providers";
 
+/** Device ID of the PC the customer came from (set when they click "Buy" inside the Revit plugin). */
+function readDevice(): string | undefined {
+  try {
+    return window.sessionStorage.getItem("veylix-device") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 type Props = {
   locale: Locale;
   t: Dictionary["checkout"];
@@ -37,6 +46,8 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
   const [renew, setRenew] = React.useState(false);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [submitting, setSubmitting] = React.useState(false);
+  /** Plugins this email already owns (server asked us to confirm the purchase is for another PC). */
+  const [owned, setOwned] = React.useState<string[] | null>(null);
 
   const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setValues((v) => ({ ...v, [key]: e.target.value }));
@@ -62,8 +73,9 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
     return e;
   }
 
-  async function onSubmit(ev: React.FormEvent) {
+  async function onSubmit(ev: React.SyntheticEvent, confirmAdditional = false) {
     ev.preventDefault();
+    setOwned(null);
     const e = validate();
     setErrors(e);
     if (Object.keys(e).length > 0) {
@@ -81,9 +93,15 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
           business: business ? { company: values.company, taxId: values.taxId, address: values.address } : undefined,
           paymentRef: values.paymentRef,
           renewKey: renew ? values.renewKey : undefined,
+          device: readDevice(),
+          confirmAdditional,
         }),
       });
-      const data = (await res.json()) as { ok: boolean; id?: string; token?: string; errors?: Record<string, string> };
+      const data = (await res.json()) as { ok: boolean; id?: string; token?: string; errors?: Record<string, string>; licensed?: string[] };
+      if (data.errors?.form === "already_licensed") {
+        setOwned(data.licensed?.length ? data.licensed : [""]);
+        return;
+      }
       if (!data.ok || !data.id || !data.token) {
         const mapped = Object.fromEntries(
           Object.entries(data.errors ?? { form: "generic" }).map(([k, v]) => [k, (t.errors as Record<string, string>)[v] ?? (t.errors as Record<string, string>)[k] ?? t.errors.generic]),
@@ -253,6 +271,29 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
               <p role="alert" className="mb-3 text-sm text-danger">
                 {errors.form}
               </p>
+            ) : null}
+            {owned ? (
+              <div role="alert" className="mb-4 rounded-xl border border-[color-mix(in_oklab,var(--warning)_45%,var(--border))] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] p-4 text-sm">
+                <p className="font-semibold">{t.owned.title}</p>
+                <p className="mt-1 text-fg-soft">{fill(t.owned.body, { products: owned.filter(Boolean).join(", ") || "VEYLIX" })}</p>
+                <div className="mt-3 grid gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setOwned(null);
+                      setRenew(true);
+                      window.setTimeout(() => document.getElementById("co-renewKey")?.focus(), 50);
+                    }}
+                  >
+                    <RefreshCw aria-hidden /> {t.owned.renew}
+                  </Button>
+                  <Button type="button" variant="ghost" size="sm" disabled={submitting} onClick={(ev) => onSubmit(ev, true)}>
+                    {t.owned.anotherPc}
+                  </Button>
+                </div>
+              </div>
             ) : null}
             <Button type="submit" size="lg" className="w-full" disabled={submitting}>
               {submitting ? <Loader2 className="animate-spin" aria-hidden /> : <Lock aria-hidden />}

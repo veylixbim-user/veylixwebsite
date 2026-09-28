@@ -21,7 +21,7 @@ import { sendEmail } from "@/lib/server/http";
 import { isArtId, type ArtId } from "@/lib/art";
 import { siteUrl } from "@/lib/site";
 
-export type ActionState = { ok?: boolean; error?: string; message?: string; keys?: string[] } | undefined;
+export type ActionState = { ok?: boolean; error?: string; message?: string; keys?: string[]; needCode?: boolean } | undefined;
 
 const str = (fd: FormData, k: string, max = 5000) => String(fd.get(k) ?? "").trim().slice(0, max);
 const intOrNull = (v: string) => {
@@ -38,8 +38,8 @@ function refreshSite() {
 /* ----------------------------- auth ----------------------------- */
 
 export async function loginAction(_: ActionState, fd: FormData): Promise<ActionState> {
-  const res = await login(str(fd, "password", 200));
-  if (!res.ok) return { error: res.error };
+  const res = await login(str(fd, "password", 200), str(fd, "code", 20));
+  if (!res.ok) return { error: res.error, needCode: res.needCode };
   redirect("/admin");
 }
 
@@ -241,14 +241,17 @@ export async function saveSettingsAction(_: ActionState, fd: FormData): Promise<
   await assertAdmin();
   const days = intOrNull(str(fd, "activationDays", 6));
   const trialDays = intOrNull(str(fd, "trialDays", 6));
+  const grace = intOrNull(str(fd, "renewalGraceDays", 3));
   const vat = intOrNull(str(fd, "vatRate", 3));
   const instapay = str(fd, "instapayNumber", 40);
   if (!days || days < 1 || days > 3650) return { error: "License check interval must be between 1 and 3650 days." };
   if (!trialDays || trialDays < 1 || trialDays > 365) return { error: "Trial length must be between 1 and 365 days." };
+  if (grace === null || grace > 30) return { error: "Renewal grace must be between 0 and 30 days." };
   if (vat === null || vat > 100) return { error: "VAT must be between 0 and 100%." };
   if (!/^[0-9+ ]{6,20}$/.test(instapay) && !/^[\w.-]+@instapay$/i.test(instapay)) return { error: "Enter a valid InstaPay number or address." };
   await setSetting("activation_days", String(days));
   await setSetting("trial_days", String(trialDays));
+  await setSetting("renewal_grace_days", String(grace));
   await setSetting("trials_enabled", fd.get("trialsEnabled") === "on" ? "1" : "0");
   await setSetting("vat_rate", String(vat));
   await setSetting("instapay_number", instapay);
@@ -319,4 +322,42 @@ export async function sendTestEmailAction(): Promise<EmailActionState> {
     kind: "test",
   });
   return res.sent ? { ok: true, message: `Test email sent to ${CONTACT_EMAIL}.` } : { error: res.error };
+}
+
+/* ------------------------- two-step sign-in ------------------------ */
+
+export type MfaState = { ok?: boolean; error?: string; message?: string; setup?: { secret: string; qrSvg: string }; codes?: string[] } | undefined;
+
+export async function startMfaAction(): Promise<MfaState> {
+  await assertAdmin();
+  const { beginMfaSetup } = await import("@/lib/server/totp");
+  const { secret, qrSvg } = await beginMfaSetup();
+  return { setup: { secret, qrSvg } };
+}
+
+export async function confirmMfaAction(prev: MfaState, fd: FormData): Promise<MfaState> {
+  await assertAdmin();
+  const { confirmMfaSetup } = await import("@/lib/server/totp");
+  const codes = await confirmMfaSetup(str(fd, "code", 12));
+  if (!codes) return { ...prev, error: "That code didn't match. Check the time on your phone and try the newest code." };
+  revalidatePath("/admin/settings");
+  return { ok: true, codes, message: "Two-step sign-in is on." };
+}
+
+export async function disableMfaAction(_: MfaState, fd: FormData): Promise<MfaState> {
+  await assertAdmin();
+  const { checkPassword } = await import("@/lib/server/auth");
+  const { disableMfa, verifyMfa } = await import("@/lib/server/totp");
+  if (!(await checkPassword(str(fd, "password", 200)))) return { error: "Password is incorrect." };
+  if (!(await verifyMfa(str(fd, "code", 20)))) return { error: "Enter a current code or a recovery code." };
+  await disableMfa();
+  revalidatePath("/admin/settings");
+  return { ok: true, message: "Two-step sign-in is off." };
+}
+
+export async function newRecoveryCodesAction(_: MfaState, fd: FormData): Promise<MfaState> {
+  await assertAdmin();
+  const { regenerateRecoveryCodes, verifyMfa } = await import("@/lib/server/totp");
+  if (!(await verifyMfa(str(fd, "code", 20)))) return { error: "Enter a current 6-digit code first." };
+  return { ok: true, codes: await regenerateRecoveryCodes(), message: "New recovery codes — the old ones no longer work." };
 }

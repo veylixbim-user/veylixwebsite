@@ -50,6 +50,17 @@ export function SiteProviders({
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // The Revit plugin's "Buy" button opens the site with ?device=<PC id>. Remember it for this visit so checkout
+  // can refuse to sell the same plugin twice to that PC.
+  React.useEffect(() => {
+    try {
+      const device = new URLSearchParams(window.location.search).get("device");
+      if (device && /^W[12]-[0-9A-Fa-f]{40}$/.test(device)) window.sessionStorage.setItem("veylix-device", device);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+
   const catalog = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   const value = React.useMemo(
     () => ({ locale, catalog, products, shop, cartOpen, setCartOpen, searchOpen, setSearchOpen }),

@@ -26,7 +26,10 @@ export const CSHARP_TEMPLATE = String.raw`// ===================================
 //     license cannot be forged or edited.
 //   - The license is valid for the check interval set in the admin panel (default 30 days).
 //     When it runs out, the plugin asks for the key again and shows the time remaining.
-//   - The license file is encrypted with Windows DPAPI and tied to this PC's hardware ID.
+//   - The license file is encrypted with Windows DPAPI and tied to this PC's hardware ID: hashed SMBIOS UUID,
+//     board serial, CPU id, Windows MachineGuid, drive serial and physical MAC addresses (never raw values).
+//     Small changes (Windows reinstall, new network card, renamed PC) keep the license; another PC does not.
+//   - One working license per plugin per PC: a second key for the same plugin is refused on that PC.
 //   - Moving the Windows clock back is detected. Revoked keys and device resets take effect
 //     at the next online check (at most every 6 hours while Revit is running).
 // =====================================================================================
@@ -39,6 +42,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -95,14 +99,14 @@ namespace Veylix.Licensing
                     s.LastSeenUtc = DateTime.UtcNow;
                     Save(s);
                     RefreshInBackground(s);
-                    TimeSpan left = s.ValidUntilUtc - DateTime.UtcNow;
-                    if (left.TotalDays < 3 && !_warnedThisSession)
+                    if (!_warnedThisSession)
                     {
-                        _warnedThisSession = true;
-                        MessageBox.Show(Owner(),
-                            ProductName + ": your license check is due in " + FormatSpan(left) + ".\n" +
-                            "You will be asked for your product key again then.",
-                            "VEYLIX license", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        string warning = Warning(s);
+                        if (warning != null)
+                        {
+                            _warnedThisSession = true;
+                            MessageBox.Show(Owner(), warning, "VEYLIX license", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        }
                     }
                     return true;
                 }
@@ -110,7 +114,8 @@ namespace Veylix.Licensing
                 string reason;
                 if (s == null) reason = "Enter your product key to activate " + ProductName + " on this PC.";
                 else if (s.ClockTampered) reason = "Your system clock was changed. Enter your product key to continue.";
-                else if (s.IsTrial) reason = "Your free trial has ended. Enter a product key to keep using " + ProductName + ".";
+                else if (s.IsTrial && s.Ended) reason = "Your free trial has ended. Enter a product key to keep using " + ProductName + ".";
+                else if (s.Ended) reason = "Your license has ended. Renew it on the VEYLIX website (same key), then enter your key here.";
                 else reason = "It's time to confirm your license. Enter your product key to continue.";
 
                 using (LicenseDialog dialog = new LicenseDialog(reason, s != null ? s.Key : ""))
@@ -132,7 +137,8 @@ namespace Veylix.Licensing
             LicenseState s = Load();
             string text = s != null && s.IsCurrentlyValid()
                 ? "Licensed. Key " + s.Key + "\nNext key check in " + FormatSpan(s.ValidUntilUtc - DateTime.UtcNow) +
-                  (s.ExpiresAtUtc.HasValue ? "\nLicense ends " + s.ExpiresAtUtc.Value.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture) : "") +
+                  (s.RenewDueUtc.HasValue ? (s.IsTrial ? "\nTrial ends " : "\nRenew by ") + FormatDate(s.RenewDueUtc.Value) : "") +
+                  (s.InGrace ? "\nGrace period: works until " + FormatDate(s.ExpiresAtUtc.Value) : "") +
                   (s.IsTrial ? "\n(Free trial)" : "")
                 : "Not activated on this PC.";
             using (LicenseDialog dialog = new LicenseDialog(text, s != null ? s.Key : ""))
@@ -151,6 +157,7 @@ namespace Veylix.Licensing
                 { "key", key.Trim() },
                 { "deviceId", DeviceId() },
                 { "deviceName", Environment.MachineName },
+                { "components", Hardware.Components() },
                 { "product", ProductSlug },
                 { "nonce", nonce },
             };
@@ -197,6 +204,7 @@ namespace Veylix.Licensing
                     {
                         { "key", key },
                         { "deviceId", DeviceId() },
+                        { "components", Hardware.Components() },
                         { "product", ProductSlug },
                         { "nonce", nonce },
                     }, 8000);
@@ -214,7 +222,7 @@ namespace Veylix.Licensing
                     else if (lines.Length >= 2 && lines[0] == "ERROR")
                     {
                         string code = lines[1];
-                        if (code == "revoked" || code == "device_mismatch" || code == "expired" || code == "invalid_key" || code == "not_activated" || code == "wrong_product")
+                        if (code == "revoked" || code == "device_mismatch" || code == "expired" || code == "invalid_key" || code == "not_activated" || code == "wrong_product" || code == "hw_limit")
                             Clear(); // key revoked or moved to another PC: ask again next time
                     }
                 }
@@ -252,7 +260,8 @@ namespace Veylix.Licensing
                     string[] parts = text.Split('\n');
                     if (parts.Length < 4) return _state = null;
                     LicenseState s = LicenseState.FromSigned(parts[0], parts[1]);
-                    if (s == null || s.DeviceId != DeviceId() || !s.MatchesProduct()) return _state = null;
+                    // Same PC: identical hardware ID, or enough hardware signals in common after a small change.
+                    if (s == null || !s.MatchesProduct() || (s.DeviceId != DeviceId() && !Hardware.Same(s.Components, Hardware.Components()))) return _state = null;
                     s.LastSeenUtc = FromUnix(long.Parse(parts[2], CultureInfo.InvariantCulture));
                     s.LastOnlineUtc = FromUnix(long.Parse(parts[3], CultureInfo.InvariantCulture));
                     return _state = s;
@@ -308,41 +317,10 @@ namespace Veylix.Licensing
             }
         }
 
-        private static string _deviceId;
-
-        /// <summary>Stable per-PC ID: hash of the Windows machine GUID, system volume serial and computer name.</summary>
+        /// <summary>Stable per-PC ID ("W2-" + 40 hex), derived from the hashed hardware signals.</summary>
         public static string DeviceId()
         {
-            if (_deviceId != null) return _deviceId;
-            string machineGuid = "";
-            try
-            {
-                using (RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
-                using (RegistryKey k = hklm.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography"))
-                {
-                    if (k != null) machineGuid = (k.GetValue("MachineGuid") as string) ?? "";
-                }
-            }
-            catch { }
-
-            uint serial = 0;
-            try
-            {
-                uint maxLen, flags;
-                string root = Path.GetPathRoot(Environment.SystemDirectory);
-                Native.GetVolumeInformation(root, null, 0, out serial, out maxLen, out flags, null, 0);
-            }
-            catch { }
-
-            string raw = machineGuid + "|" + serial.ToString("X8", CultureInfo.InvariantCulture) + "|" + Environment.MachineName.ToUpperInvariant();
-            using (SHA256 sha = SHA256.Create())
-            {
-                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(raw));
-                StringBuilder sb = new StringBuilder("W1-");
-                for (int i = 0; i < 20; i++) sb.Append(hash[i].ToString("x2", CultureInfo.InvariantCulture));
-                _deviceId = sb.ToString();
-            }
-            return _deviceId;
+            return Hardware.DeviceId();
         }
 
         private static string RandomToken(int length)
@@ -412,6 +390,27 @@ namespace Veylix.Licensing
             return Math.Max(1, (int)t.TotalMinutes) + " minutes";
         }
 
+        internal static string FormatDate(DateTime utc)
+        {
+            return utc.ToLocalTime().ToString("d MMM yyyy", CultureInfo.InvariantCulture);
+        }
+
+        private static string Warning(LicenseState s)
+        {
+            DateTime now = DateTime.UtcNow;
+            if (s.InGrace)
+                return ProductName + ": your license ended on " + FormatDate(s.RenewDueUtc.Value) + ".\n" +
+                       "It keeps working until " + FormatDate(s.ExpiresAtUtc.Value) + ". Renew it on the VEYLIX website (your key stays the same).";
+            if (s.RenewDueUtc.HasValue && (s.RenewDueUtc.Value - now).TotalDays < 3)
+                return s.IsTrial
+                    ? ProductName + ": your free trial ends in " + FormatSpan(s.RenewDueUtc.Value - now) + ". Buy a license on the VEYLIX website to keep using it."
+                    : ProductName + ": your license ends in " + FormatSpan(s.RenewDueUtc.Value - now) + ".\nRenew it on the VEYLIX website (your key stays the same).";
+            TimeSpan left = s.ValidUntilUtc - now;
+            if (left.TotalDays < 3)
+                return ProductName + ": your license check is due in " + FormatSpan(left) + ".\nYou will be asked for your product key again then.";
+            return null;
+        }
+
         internal static IWin32Window Owner()
         {
             return new WindowHandle(Process.GetCurrentProcess().MainWindowHandle);
@@ -433,7 +432,9 @@ namespace Veylix.Licensing
         public string Scope;
         public DateTime ValidUntilUtc;
         public DateTime IssuedAtUtc;
-        public DateTime? ExpiresAtUtc;
+        public DateTime? ExpiresAtUtc;   // hard stop (end date + grace)
+        public DateTime? RenewDueUtc;    // the subscription / trial end date shown to the user
+        public string Components = "";
         public int CheckDays;
         public bool IsTrial;
         public string Nonce;
@@ -455,12 +456,22 @@ namespace Veylix.Licensing
             return !ClockTampered && DateTime.UtcNow < ValidUntilUtc && (!ExpiresAtUtc.HasValue || DateTime.UtcNow < ExpiresAtUtc.Value);
         }
 
+        public bool Ended
+        {
+            get { return ExpiresAtUtc.HasValue && DateTime.UtcNow >= ExpiresAtUtc.Value; }
+        }
+
+        public bool InGrace
+        {
+            get { return !IsTrial && RenewDueUtc.HasValue && ExpiresAtUtc.HasValue && DateTime.UtcNow > RenewDueUtc.Value && DateTime.UtcNow < ExpiresAtUtc.Value; }
+        }
+
         public bool MatchesProduct()
         {
             return Scope == "*" || Scope == VeylixLicense.ProductSlug;
         }
 
-        /// <summary>Parses VLX1|key|device|scope|validUntil|issuedAt|expiresAt|days|trial|nonce after checking the RSA signature.</summary>
+        /// <summary>Parses VLX1|key|device|scope|validUntil|issuedAt|hardStop|days|trial|nonce|components|renewDue after checking the RSA signature.</summary>
         public static LicenseState FromSigned(string payload, string signature)
         {
             if (string.IsNullOrEmpty(payload) || string.IsNullOrEmpty(signature)) return null;
@@ -481,6 +492,8 @@ namespace Veylix.Licensing
                 CheckDays = int.Parse(p[7], CultureInfo.InvariantCulture),
                 IsTrial = p[8] == "1",
                 Nonce = p[9],
+                Components = p.Length > 10 ? p[10] : "",
+                RenewDueUtc = p.Length > 11 && p[11] != "0" && p[11].Length > 0 ? (DateTime?)VeylixLicense.FromUnix(long.Parse(p[11], CultureInfo.InvariantCulture)) : null,
                 LastSeenUtc = DateTime.UtcNow,
                 LastOnlineUtc = DateTime.UtcNow,
             };
@@ -527,7 +540,8 @@ namespace Veylix.Licensing
             _activate.Click += OnActivate;
             buy.Click += delegate
             {
-                try { Process.Start(new ProcessStartInfo(VeylixLicense.ServerUrl.TrimEnd('/') + "/en/products/" + VeylixLicense.ProductSlug) { UseShellExecute = true }); } catch { }
+                // The device ID lets the website refuse to sell this plugin twice to the same PC.
+                try { Process.Start(new ProcessStartInfo(VeylixLicense.ServerUrl.TrimEnd('/') + "/en/products/" + VeylixLicense.ProductSlug + "?device=" + VeylixLicense.DeviceId()) { UseShellExecute = true }); } catch { }
             };
 
             Controls.AddRange(new Control[] { title, _message, keyLabel, _key, help, _activate, buy, close });
@@ -561,8 +575,241 @@ namespace Veylix.Licensing
         }
     }
 
+    /// <summary>
+    /// Hardware identity. Collects hashed signals (never raw values) and decides whether two signal lists are the
+    /// same PC. The rule MUST stay identical to src/lib/server/hardware.ts on the website.
+    /// </summary>
+    internal static class Hardware
+    {
+        private static readonly string[] Types = { "uuid", "board", "cpu", "mg", "vol", "mac" };
+        private static string _components;
+        private static string _deviceId;
+
+        private static int Weight(string type)
+        {
+            switch (type)
+            {
+                case "uuid": return 3;
+                case "mac": case "board": case "mg": return 2;
+                default: return 1;
+            }
+        }
+
+        public static string DeviceId()
+        {
+            if (_deviceId != null) return _deviceId;
+            string c = Components();
+            string basis = c.Length > 0 ? c : "VLXHW-EMPTY|" + Environment.MachineName.ToUpperInvariant();
+            _deviceId = "W2-" + Sha256Hex(basis).Substring(0, 40);
+            return _deviceId;
+        }
+
+        /// <summary>"type:hash,..." sorted like the server's formatComponents().</summary>
+        public static string Components()
+        {
+            if (_components != null) return _components;
+            List<KeyValuePair<string, string>> list = new List<KeyValuePair<string, string>>();
+            try
+            {
+                string uuid, board, cpu;
+                ReadSmbios(out uuid, out board, out cpu);
+                if (uuid != null) list.Add(Pair("uuid", uuid));
+                if (board != null) list.Add(Pair("board", board));
+                if (cpu != null) list.Add(Pair("cpu", cpu));
+            }
+            catch { }
+            try
+            {
+                using (RegistryKey hklm = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+                using (RegistryKey k = hklm.OpenSubKey(@"SOFTWARE\Microsoft\Cryptography"))
+                {
+                    string mg = k != null ? (k.GetValue("MachineGuid") as string) : null;
+                    if (!string.IsNullOrWhiteSpace(mg)) list.Add(Pair("mg", mg.Trim().ToLowerInvariant()));
+                }
+            }
+            catch { }
+            try
+            {
+                uint serial, maxLen, flags;
+                if (Native.GetVolumeInformation(Path.GetPathRoot(Environment.SystemDirectory), null, 0, out serial, out maxLen, out flags, null, 0) && serial != 0)
+                    list.Add(Pair("vol", serial.ToString("X8", CultureInfo.InvariantCulture)));
+            }
+            catch { }
+            try
+            {
+                foreach (string mac in PhysicalMacs()) list.Add(Pair("mac", mac));
+            }
+            catch { }
+
+            List<string> parts = new List<string>();
+            foreach (string type in Types)
+            {
+                List<string> hashes = list.Where(p => p.Key == type).Select(p => p.Value).Distinct().OrderBy(h => h, StringComparer.Ordinal).ToList();
+                if (type != "mac" && hashes.Count > 1) hashes = hashes.Take(1).ToList();
+                foreach (string h in hashes.Take(8)) parts.Add(type + ":" + h);
+            }
+            _components = string.Join(",", parts.ToArray());
+            return _components;
+        }
+
+        private static KeyValuePair<string, string> Pair(string type, string value)
+        {
+            return new KeyValuePair<string, string>(type, Sha256Hex("VLXHW|" + type + "|" + value).Substring(0, 16));
+        }
+
+        internal static string Sha256Hex(string text)
+        {
+            using (SHA256 sha = SHA256.Create())
+            {
+                byte[] hash = sha.ComputeHash(Encoding.UTF8.GetBytes(text));
+                StringBuilder sb = new StringBuilder(hash.Length * 2);
+                foreach (byte b in hash) sb.Append(b.ToString("x2", CultureInfo.InvariantCulture));
+                return sb.ToString();
+            }
+        }
+
+        /// <summary>Burned-in MACs of real adapters. Virtual, VPN and randomised (locally administered) MACs are skipped.</summary>
+        internal static List<string> PhysicalMacs()
+        {
+            string[] skip = { "virtual", "vmware", "hyper-v", "vbox", "virtualbox", "vpn", "tap-", "tap ", "tun", "loopback", "bluetooth", "miniport",
+                              "npcap", "docker", "wsl", "pseudo", "teredo", "isatap", "wi-fi direct", "tailscale", "zerotier", "wireguard", "hamachi",
+                              "anyconnect", "fortinet", "vethernet", "kernel debug" };
+            List<string> macs = new List<string>();
+            foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                NetworkInterfaceType t = nic.NetworkInterfaceType;
+                if (t != NetworkInterfaceType.Ethernet && t != NetworkInterfaceType.Wireless80211 && t != NetworkInterfaceType.GigabitEthernet &&
+                    t != NetworkInterfaceType.FastEthernetT && t != NetworkInterfaceType.FastEthernetFx) continue;
+                string label = ((nic.Description ?? "") + " " + (nic.Name ?? "")).ToLowerInvariant();
+                if (skip.Any(k => label.Contains(k))) continue;
+                byte[] a = nic.GetPhysicalAddress().GetAddressBytes();
+                if (a.Length != 6 || a.All(b => b == 0)) continue;
+                if ((a[0] & 0x02) != 0 || (a[0] & 0x01) != 0) continue; // locally administered (random/spoofed) or multicast
+                macs.Add(BitConverter.ToString(a).Replace("-", "").ToLowerInvariant());
+            }
+            return macs.Distinct().OrderBy(m => m, StringComparer.Ordinal).Take(8).ToList();
+        }
+
+        private static void ReadSmbios(out string uuid, out string board, out string cpu)
+        {
+            const uint RSMB = 0x52534D42;
+            uint size = Native.GetSystemFirmwareTable(RSMB, 0, null, 0);
+            if (size == 0 || size > 1024 * 1024) { uuid = board = cpu = null; return; }
+            byte[] buffer = new byte[size];
+            if (Native.GetSystemFirmwareTable(RSMB, 0, buffer, size) != size) { uuid = board = cpu = null; return; }
+            ParseSmbios(buffer, out uuid, out board, out cpu);
+        }
+
+        /// <summary>Parses a RawSMBIOSData blob: type 1 = system UUID, type 2 = baseboard serial, type 4 = processor id.</summary>
+        internal static void ParseSmbios(byte[] raw, out string uuid, out string board, out string cpu)
+        {
+            uuid = board = cpu = null;
+            if (raw == null || raw.Length < 8) return;
+            int end = Math.Min(raw.Length, 8 + BitConverter.ToInt32(raw, 4));
+            int pos = 8;
+            while (pos + 4 <= end)
+            {
+                byte type = raw[pos];
+                int len = raw[pos + 1];
+                if (len < 4 || pos + len > end) break;
+                List<string> strings = new List<string>();
+                int p = pos + len;
+                while (p + 1 < end && !(raw[p] == 0 && raw[p + 1] == 0))
+                {
+                    int start = p;
+                    while (p < end && raw[p] != 0) p++;
+                    strings.Add(Encoding.ASCII.GetString(raw, start, p - start));
+                    if (p < end && raw[p] == 0 && p + 1 < end && raw[p + 1] == 0) break;
+                    p++;
+                }
+                int next = p + 2;
+
+                if (type == 1 && len >= 0x18 && uuid == null)
+                {
+                    byte[] u = new byte[16];
+                    Array.Copy(raw, pos + 8, u, 0, 16);
+                    string hex = BitConverter.ToString(u).Replace("-", "").ToLowerInvariant();
+                    if (!u.All(b => b == 0) && !u.All(b => b == 0xFF) && hex != "03000200040005000006000700080009") uuid = hex;
+                }
+                else if (type == 2 && len >= 0x08 && board == null)
+                {
+                    int idx = raw[pos + 7];
+                    if (idx > 0 && idx <= strings.Count) board = CleanSerial(strings[idx - 1]);
+                }
+                else if (type == 4 && len >= 0x10 && cpu == null)
+                {
+                    byte[] id = new byte[8];
+                    Array.Copy(raw, pos + 8, id, 0, 8);
+                    if (!id.All(b => b == 0)) cpu = BitConverter.ToString(id).Replace("-", "").ToLowerInvariant();
+                }
+                else if (type == 127) break;
+                pos = next;
+            }
+        }
+
+        private static string CleanSerial(string s)
+        {
+            if (s == null) return null;
+            string v = s.Trim();
+            string l = v.ToLowerInvariant();
+            if (v.Length < 3 || l.Contains("o.e.m") || l.Contains("default") || l.Contains("filled") || l == "none" || l.Contains("not applicable") ||
+                l.Contains("serial number") || l == "0123456789" || v.All(ch => ch == v[0])) return null;
+            return v.ToUpperInvariant();
+        }
+
+        private static Dictionary<string, HashSet<string>> Parse(string raw)
+        {
+            Dictionary<string, HashSet<string>> map = new Dictionary<string, HashSet<string>>();
+            if (string.IsNullOrEmpty(raw)) return map;
+            foreach (string entry in raw.ToLowerInvariant().Split(',').Take(16))
+            {
+                string e = entry.Trim();
+                int colon = e.IndexOf(':');
+                if (colon <= 0) continue;
+                string type = e.Substring(0, colon);
+                string hash = e.Substring(colon + 1);
+                if (Array.IndexOf(Types, type) < 0 || hash.Length != 16 || !hash.All(ch => (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f'))) continue;
+                HashSet<string> set;
+                if (!map.TryGetValue(type, out set))
+                {
+                    set = new HashSet<string>();
+                    map[type] = set;
+                }
+                else if (type != "mac") continue;
+                if (type == "mac" && set.Count >= 8) continue;
+                set.Add(hash);
+            }
+            return map;
+        }
+
+        /// <summary>Same PC? With an SMBIOS UUID on both sides it must match and the score reach 6; otherwise a
+        /// physical MAC must match and the score reach 4. Weights: uuid 3, mac/board/mg 2, cpu/vol 1.</summary>
+        public static bool Same(string a, string b)
+        {
+            Dictionary<string, HashSet<string>> x = Parse(a), y = Parse(b);
+            if (x.Count == 0 || y.Count == 0) return false;
+            int score = 0;
+            HashSet<string> matched = new HashSet<string>();
+            foreach (string type in Types)
+            {
+                HashSet<string> xs, ys;
+                if (!x.TryGetValue(type, out xs) || !y.TryGetValue(type, out ys)) continue;
+                if (xs.Overlaps(ys))
+                {
+                    score += Weight(type);
+                    matched.Add(type);
+                }
+            }
+            if (x.ContainsKey("uuid") && y.ContainsKey("uuid")) return matched.Contains("uuid") && score >= 6;
+            return matched.Contains("mac") && score >= 4;
+        }
+    }
+
     internal static class Native
     {
+        [DllImport("kernel32.dll", SetLastError = true)]
+        internal static extern uint GetSystemFirmwareTable(uint firmwareTableProviderSignature, uint firmwareTableId, byte[] firmwareTableBuffer, uint bufferSize);
+
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         internal static extern bool GetVolumeInformation(string rootPathName, StringBuilder volumeNameBuffer, int volumeNameSize,
             out uint volumeSerialNumber, out uint maximumComponentLength, out uint fileSystemFlags, StringBuilder fileSystemNameBuffer, int fileSystemNameSize);

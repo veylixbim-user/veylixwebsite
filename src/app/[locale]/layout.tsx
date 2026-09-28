@@ -17,9 +17,9 @@ import { CommandMenu, type CommandItem } from "@/components/layout/command-menu"
 import { themeScript } from "@/components/layout/theme-toggle";
 import { RevealObserver } from "@/components/motion/reveal-observer";
 
-
-export const dynamicParams = false;
 // Pages are cached and refreshed every minute; admin changes also refresh them immediately.
+// (No `dynamicParams = false` here: with it, Next.js 16 answers 404 whenever it re-renders a cached page on
+// demand. Unknown locales are rejected by notFound() in the layout instead.)
 export const revalidate = 60;
 
 export function generateStaticParams() {
