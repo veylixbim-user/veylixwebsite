@@ -592,3 +592,23 @@ export async function workingPaidKeys(by: { email?: string; deviceId?: string },
   );
   return rows.map(map).filter((k) => !isPast(effectiveEnd(k, settings.renewalGraceDays)));
 }
+
+/**
+ * Admin renewal (e.g. the customer paid you directly). Adds a month or a year the same way a paid renewal
+ * order does: from the old end date if the key is still working (end date + grace), otherwise from today.
+ * A trial key becomes a paid key.
+ */
+export async function renewKeyById(id: number, billing: "monthly" | "yearly") {
+  const key = await getKeyById(id);
+  if (!key) return { ok: false as const, error: "Key not found." };
+  if (key.revoked) return { ok: false as const, error: "This key is revoked. Restore it first." };
+  if (!key.expiresAt && !key.trial) return { ok: false as const, error: "This key never expires, so there is nothing to renew." };
+  const { renewalGraceDays } = await getSettings();
+  const now = Date.now();
+  const end = key.expiresAt?.getTime() ?? null;
+  const base = new Date(end !== null && now <= end + renewalGraceDays * DAY_MS ? end : now);
+  const newEnd = new Date(base);
+  newEnd.setMonth(newEnd.getMonth() + (billing === "yearly" ? 12 : 1));
+  await query("UPDATE license_keys SET expires_at = $2, trial = false, reminder_stage = 0 WHERE id = $1", [id, newEnd]);
+  return { ok: true as const, key, newEnd };
+}

@@ -149,6 +149,7 @@ keys table shows a **moved N×** badge, and **Reset device** clears the counter 
 | D10 | Renewal pending → no reminder spam | Reminders pause | M05 |
 | D11 | Renewing with a key for another plugin / a never-expiring key / 2 units | Refused with a clear message | C06, C07, C08 |
 | D12 | Admin shortens the check interval / forces a re-check | Reaches every PC at its next online check | A01 |
+| D14 | Customer paid you outside the website (e.g. InstaPay directly) | **Keys → Manage → Renew +1 month / +1 year**: same rule as D5–D7, trial keys become paid, optional email to the customer, logged | AR1–AR7 |
 | D13 | Plugin offline for longer than the check interval | Asks for the key (online needed) — never before `validUntil` | (plugin logic) |
 
 ### E. Offline and clock
@@ -181,6 +182,7 @@ keys table shows a **moved N×** badge, and **Reset device** clears the counter 
 | --- | --- | --- |
 | Revoke | Next status check (≤ 6 h online) → locked; downloads refused | A02 |
 | Restore | Works again | A02 |
+| Renew +1 month / +1 year | New end date reaches the PC at its next status check (or immediately when the key is entered) | AR1–AR7 |
 | Reset device | Key can be activated on a new PC; the old PC is refused; the hardware counter is cleared | A03, A03b |
 | Ask for key now | Next status check → plugin asks for the key | A01 |
 | Set expiry / check days / product / owner | Applies at the next status check | logic |
@@ -247,6 +249,7 @@ keys table shows a **moved N×** badge, and **Reset device** clears the counter 
 | Key leaked online | **Revoke** it and send the customer a new key (**Generate keys** → assign to their email). |
 | Customer bought the same plugin twice by mistake | **Reject** the second order if it's still pending, or refund it and **Revoke** the extra key. To add it to their license instead: **Set expiry** on the old key (+1 month) and revoke the new one. |
 | Payment reversed after keys were issued | **Revoke** the keys from that order (search the order ID on the keys page). |
+| Customer paid you directly (not through the website) | **License keys → search the key → Manage → Renew** (+1 month or +1 year, tick "Email the customer"). |
 | Customer paid a renewal but the plugin still says "ended" | Approve the order in **Orders**. The license is extended from the old end date and reaches the PC at its next check (or when they re-enter the key). |
 | Lost your authenticator phone | Sign in with a **recovery code**. No codes left? Set `ADMIN_MFA_DISABLED=1` in Vercel, redeploy, sign in, turn two-step sign-in off and on again, then remove the variable. |
 | Suspect the admin password leaked | **Settings → Admin password** (signs out every session) and make sure two-step sign-in is on. |

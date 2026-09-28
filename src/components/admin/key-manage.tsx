@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { Dialog } from "radix-ui";
-import { Ban, Loader2, MonitorX, RotateCcw, Settings2, Timer, Trash2, X } from "lucide-react";
+import { Ban, CalendarPlus, Loader2, MonitorX, RotateCcw, Settings2, Timer, Trash2, X } from "lucide-react";
 import { keyAction, type ActionState } from "@/app/admin/actions";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
@@ -124,6 +124,32 @@ export function KeyManage({ k, products }: { k: KeyView; products: { id: string;
                 </Button>
               </ActionForm>
             </div>
+
+            <ActionForm
+              id={k.id}
+              action="renew"
+              extra={
+                <div className="grid gap-2">
+                  <p className="text-sm font-medium">Renew (customer paid you)</p>
+                  <p className="text-xs text-muted">
+                    Adds time from the current end date — or from today if the license already lapsed past the grace period. A trial key becomes a paid key.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Select name="period" defaultValue="monthly" aria-label="Renewal period" className="h-9 w-40">
+                      <option value="monthly">+1 month</option>
+                      <option value="yearly">+1 year</option>
+                    </Select>
+                    <label className="inline-flex items-center gap-1.5 text-xs text-muted">
+                      <input type="checkbox" name="notify" defaultChecked className="size-4 accent-[var(--accent)]" /> Email the customer
+                    </label>
+                  </div>
+                </div>
+              }
+            >
+              <Button type="submit" size="sm" disabled={k.status === "revoked"}>
+                <CalendarPlus aria-hidden /> Renew
+              </Button>
+            </ActionForm>
 
             <ActionForm
               id={k.id}
