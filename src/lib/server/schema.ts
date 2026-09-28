@@ -1,0 +1,126 @@
+/** Idempotent schema. Each statement runs on first use in every environment. */
+export const SCHEMA_SQL: string[] = [
+  `CREATE TABLE IF NOT EXISTS settings (
+    key text PRIMARY KEY,
+    value text NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS products (
+    id text PRIMARY KEY,
+    slug text NOT NULL UNIQUE,
+    name text NOT NULL,
+    tagline_en text NOT NULL DEFAULT '',
+    tagline_ar text NOT NULL DEFAULT '',
+    description_en text NOT NULL DEFAULT '',
+    description_ar text NOT NULL DEFAULT '',
+    features_en text NOT NULL DEFAULT '',
+    features_ar text NOT NULL DEFAULT '',
+    version text NOT NULL DEFAULT '',
+    revit_versions text NOT NULL DEFAULT '',
+    price_monthly integer,
+    price_yearly integer,
+    images jsonb NOT NULL DEFAULT '[]'::jsonb,
+    file_url text,
+    file_name text,
+    file_size bigint,
+    art text,
+    published boolean NOT NULL DEFAULT false,
+    sort_order integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  // Columns added after the first release.
+  `ALTER TABLE products ADD COLUMN IF NOT EXISTS art text`,
+  `CREATE TABLE IF NOT EXISTS license_keys (
+    id serial PRIMARY KEY,
+    key text NOT NULL UNIQUE,
+    product_id text REFERENCES products(id) ON DELETE SET NULL,
+    revoked boolean NOT NULL DEFAULT false,
+    assigned_to text,
+    note text,
+    order_id text,
+    device_id text,
+    device_name text,
+    activated_at timestamptz,
+    last_check_at timestamptz,
+    expires_at timestamptz,
+    activation_days integer,
+    trial boolean NOT NULL DEFAULT false,
+    trial_days integer,
+    downloads integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS license_keys_product_idx ON license_keys (product_id)`,
+  `CREATE INDEX IF NOT EXISTS license_keys_device_idx ON license_keys (device_id)`,
+  `CREATE TABLE IF NOT EXISTS orders (
+    id text PRIMARY KEY,
+    access_token text NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    method text NOT NULL,
+    payment_ref text NOT NULL DEFAULT '',
+    customer_name text NOT NULL,
+    customer_email text NOT NULL,
+    customer_phone text NOT NULL,
+    company text,
+    tax_id text,
+    address text,
+    renew_key text,
+    items jsonb NOT NULL,
+    subtotal_cents integer NOT NULL,
+    vat_cents integer NOT NULL,
+    total_cents integer NOT NULL,
+    vat_rate numeric NOT NULL DEFAULT 0,
+    license_keys jsonb NOT NULL DEFAULT '[]'::jsonb,
+    invoice_number text,
+    admin_note text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS login_attempts (
+    ip text PRIMARY KEY,
+    failures integer NOT NULL DEFAULT 0,
+    first_failure_at timestamptz NOT NULL DEFAULT now(),
+    locked_until timestamptz
+  )`,
+  `CREATE TABLE IF NOT EXISTS rate_limits (
+    bucket text PRIMARY KEY,
+    count integer NOT NULL DEFAULT 0,
+    window_start timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS messages (
+    id serial PRIMARY KEY,
+    topic text NOT NULL DEFAULT 'support',
+    name text NOT NULL,
+    email text NOT NULL,
+    company text,
+    seats text,
+    body text NOT NULL DEFAULT '',
+    locale text,
+    handled boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS subscribers (
+    email text PRIMARY KEY,
+    locale text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE TABLE IF NOT EXISTS email_log (
+    id serial PRIMARY KEY,
+    to_email text NOT NULL,
+    subject text NOT NULL,
+    body text NOT NULL,
+    kind text NOT NULL DEFAULT 'manual',
+    status text NOT NULL,
+    error text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS email_log_to_idx ON email_log (lower(to_email))`,
+  `CREATE TABLE IF NOT EXISTS activity (
+    id serial PRIMARY KEY,
+    kind text NOT NULL,
+    key_id integer,
+    product_id text,
+    detail text,
+    ip text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+];
