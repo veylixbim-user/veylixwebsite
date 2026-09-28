@@ -24,6 +24,8 @@ GMAIL_APP_PASSWORD="test test test test" SMTP_HOST=127.0.0.1 SMTP_PORT=2525 npx 
 # 3. tests (NODE_PATH lets the scripts find a globally installed playwright)
 NODE_PATH=$(npm root -g) node tests/e2e/1-setup.cjs     # admin security, products, keys, settings
 NODE_PATH=$(npm root -g) node tests/e2e/2-cases.mjs     # 80 licensing / checkout / renewal / email / MFA cases
+# (or, on another fresh database after 1-setup) the admin Renew button:
+NODE_PATH=$(npm root -g) node tests/e2e/3-admin-renew.mjs
 ```
 
 Run them on an empty database: the cases build on each other (keys bound in one case are reused later).

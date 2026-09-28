@@ -162,6 +162,24 @@ export async function keyAction(_: ActionState, fd: FormData): Promise<ActionSta
   const id = Number(str(fd, "id", 12));
   const action = str(fd, "action", 30);
   if (!id) return { error: "Missing key." };
+  if (action === "renew") {
+    const { renewKeyById } = await import("@/lib/server/license-keys");
+    const res = await renewKeyById(id, str(fd, "period", 10) === "yearly" ? "yearly" : "monthly");
+    if (!res.ok) return { error: res.error };
+    const until = res.newEnd.toISOString().slice(0, 10);
+    await logActivity("key:renew", { keyId: id, detail: `until ${until}` });
+    if (fd.get("notify") === "on" && res.key.assignedTo?.includes("@")) {
+      const product = res.key.productName ?? "VEYLIX";
+      await sendEmail(
+        res.key.assignedTo,
+        `Your ${product} license is renewed until ${until}`,
+        `Hi,\n\nYour ${product} license (key ${res.key.key}) has been renewed. It is now valid until ${until}.\n\nNothing to reinstall: the plugin picks up the new date at its next online check, or right away if you enter your key again.\n\nThank you!\n— VEYLIX\n\n—\n\nتم تجديد ترخيص ${product} (المفتاح ${res.key.key}) حتى ${until}. لا حاجة لإعادة التثبيت.`,
+        "order",
+      ).catch(() => undefined);
+    }
+    revalidatePath("/admin/keys");
+    return { ok: true, message: `Renewed until ${until}.` };
+  }
   let update: KeyUpdate;
   switch (action) {
     case "revoke":
