@@ -51,6 +51,14 @@ export const SCHEMA_SQL: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS license_keys_product_idx ON license_keys (product_id)`,
   `CREATE INDEX IF NOT EXISTS license_keys_device_idx ON license_keys (device_id)`,
+  // Hardware fingerprint (hashed signals), hardware-change limiter and renewal reminders.
+  `ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS device_components text`,
+  `ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS hw_changes integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS hw_window_start timestamptz`,
+  `ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS hw_window_count integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS reminder_stage integer NOT NULL DEFAULT 0`,
+  `ALTER TABLE license_keys ADD COLUMN IF NOT EXISTS reminder_for timestamptz`,
+  `CREATE INDEX IF NOT EXISTS license_keys_assigned_idx ON license_keys (lower(assigned_to))`,
   `CREATE TABLE IF NOT EXISTS orders (
     id text PRIMARY KEY,
     access_token text NOT NULL,
@@ -75,6 +83,8 @@ export const SCHEMA_SQL: string[] = [
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
   )`,
+  `CREATE INDEX IF NOT EXISTS orders_payref_idx ON orders (upper(regexp_replace(payment_ref, '[^A-Za-z0-9]', '', 'g')))`,
+  `CREATE INDEX IF NOT EXISTS orders_renew_idx ON orders (renew_key) WHERE renew_key IS NOT NULL`,
   `CREATE TABLE IF NOT EXISTS login_attempts (
     ip text PRIMARY KEY,
     failures integer NOT NULL DEFAULT 0,

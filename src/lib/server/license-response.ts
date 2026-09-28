@@ -9,12 +9,15 @@ export const LICENSE_MESSAGES: Record<LicenseError | "rate_limited" | "bad_reque
   device_mismatch: "This key is already activated on another PC. Contact support to move it.",
   not_activated: "This key has not been activated on this PC yet.",
   trial_used: "A free trial was already used on this PC. Please buy a product key.",
+  trial_not_eligible: "This PC already had a paid license for this plugin, so a free trial isn't available. Renew your license instead.",
+  already_licensed: "This PC already has a working license for this plugin. Use this new key on another PC, or contact VEYLIX support to add it to your current license.",
+  hw_limit: "This key has moved between PCs too often this month. Contact VEYLIX support to confirm your PC.",
   rate_limited: "Too many attempts. Please wait a few minutes and try again.",
   bad_request: "Invalid request.",
   unavailable: "The license server is temporarily unavailable. Please try again later.",
 };
 
-const STATUS: Record<string, number> = { invalid_key: 404, revoked: 403, expired: 403, wrong_product: 403, device_mismatch: 409, not_activated: 409, trial_used: 403, rate_limited: 429, bad_request: 400, unavailable: 503 };
+const STATUS: Record<string, number> = { invalid_key: 404, revoked: 403, expired: 403, wrong_product: 403, device_mismatch: 409, not_activated: 409, trial_used: 403, trial_not_eligible: 403, already_licensed: 409, hw_limit: 409, rate_limited: 429, bad_request: 400, unavailable: 503 };
 
 function wantsText(request: Request) {
   return new URL(request.url).searchParams.get("format") === "text";
@@ -33,6 +36,7 @@ export function licenseOk(request: Request, grant: LicenseGrant) {
       signature: grant.signature,
       validUntil: grant.validUntil.toISOString(),
       expiresAt: grant.expiresAt?.toISOString() ?? null,
+      renewDue: grant.renewDue?.toISOString() ?? null,
       checkIntervalDays: grant.checkIntervalDays,
       scope: grant.scope,
     },

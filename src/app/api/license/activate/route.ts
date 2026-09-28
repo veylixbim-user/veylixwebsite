@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   if (!f?.key || !f.deviceId) return licenseError(request, "bad_request");
   if (!(await rateLimit(`activate-key:${f.key.toUpperCase().replace(/[^A-Z0-9]/g, "")}`, 10, 3600))) return licenseError(request, "rate_limited");
   try {
-    const res = await activate({ key: f.key, deviceId: f.deviceId, deviceName: f.deviceName, product: f.product || null, nonce: f.nonce, ip });
+    const res = await activate({ key: f.key, deviceId: f.deviceId, deviceName: f.deviceName, components: f.components, product: f.product || null, nonce: f.nonce, ip });
     return res.ok ? licenseOk(request, res.grant) : licenseError(request, res.error);
   } catch (err) {
     console.error("[license/activate]", err);

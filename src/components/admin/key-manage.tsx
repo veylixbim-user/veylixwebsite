@@ -25,6 +25,10 @@ export type KeyView = {
   expiresAt: string | null;
   activationDays: number | null;
   downloads: number;
+  /** Hardware changes the key followed in total, and within the current 30-day window. */
+  hwChanges: number;
+  hwRecent: number;
+  hwSignals: number;
 };
 
 function ActionForm({ id, action, children, extra }: { id: number; action: string; children: React.ReactNode; extra?: React.ReactNode }) {
@@ -86,6 +90,12 @@ export function KeyManage({ k, products }: { k: KeyView; products: { id: string;
             <dd>{fmt(k.expiresAt)}</dd>
             <dt className="text-muted">Downloads</dt>
             <dd>{k.downloads}</dd>
+            <dt className="text-muted">Hardware ID</dt>
+            <dd>{k.deviceId ? `${k.hwSignals} signals${k.hwSignals ? "" : " (older plugin)"}` : "—"}</dd>
+            <dt className="text-muted">Hardware changes followed</dt>
+            <dd className={k.hwRecent >= 2 ? "text-warning" : undefined}>
+              {k.hwChanges} total · {k.hwRecent} in the last 30 days (limit 3)
+            </dd>
           </dl>
 
           <div className="mt-5 grid gap-4">

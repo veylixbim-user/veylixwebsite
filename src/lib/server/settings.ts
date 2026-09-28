@@ -5,6 +5,8 @@ import { query } from "./db";
 export type PublicSettings = {
   activationDays: number;
   trialDays: number;
+  /** Days a paid key keeps working after its end date, so a late renewal doesn't cut the user off. */
+  renewalGraceDays: number;
   trialsEnabled: boolean;
   instapayNumber: string;
   instapayName: string;
@@ -14,6 +16,7 @@ export type PublicSettings = {
 export const DEFAULT_SETTINGS: PublicSettings = {
   activationDays: 30,
   trialDays: 14,
+  renewalGraceDays: 3,
   trialsEnabled: true,
   instapayNumber: "01100444395",
   instapayName: "",
@@ -35,6 +38,7 @@ export async function getSettings(): Promise<PublicSettings> {
   return {
     activationDays: toInt(map.get("activation_days"), DEFAULT_SETTINGS.activationDays, 1, 3650),
     trialDays: toInt(map.get("trial_days"), DEFAULT_SETTINGS.trialDays, 1, 365),
+    renewalGraceDays: toInt(map.get("renewal_grace_days"), DEFAULT_SETTINGS.renewalGraceDays, 0, 30),
     trialsEnabled: (map.get("trials_enabled") ?? "1") === "1",
     instapayNumber: map.get("instapay_number") ?? DEFAULT_SETTINGS.instapayNumber,
     instapayName: map.get("instapay_name") ?? DEFAULT_SETTINGS.instapayName,

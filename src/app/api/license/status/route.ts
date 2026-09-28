@@ -13,7 +13,7 @@ export async function POST(request: Request) {
   const f = await readFields(request);
   if (!f?.key || !f.deviceId) return licenseError(request, "bad_request");
   try {
-    const res = await licenseStatus({ key: f.key, deviceId: f.deviceId, product: f.product || null, nonce: f.nonce });
+    const res = await licenseStatus({ key: f.key, deviceId: f.deviceId, components: f.components, product: f.product || null, nonce: f.nonce });
     return res.ok ? licenseOk(request, res.grant) : licenseError(request, res.error);
   } catch (err) {
     console.error("[license/status]", err);
