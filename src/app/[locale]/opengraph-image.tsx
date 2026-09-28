@@ -38,10 +38,10 @@ export default async function OpengraphImage() {
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           <div style={{ fontSize: 76, fontWeight: 700, lineHeight: 1.02, letterSpacing: -3 }}>Electrical BIM,</div>
           <div style={{ fontSize: 76, fontWeight: 700, lineHeight: 1.02, letterSpacing: -3, color: "#00E5FF" }}>Supercharged.</div>
-          <div style={{ fontSize: 28, color: "#8B92A1", marginTop: 10 }}>Premium Revit plugins · Revit 2021–2025 · Priced in EGP</div>
+          <div style={{ fontSize: 28, color: "#8B92A1", marginTop: 10 }}>Premium Revit plugins for electrical engineers</div>
         </div>
         <div style={{ display: "flex", gap: 12, fontSize: 22, color: "#C9CED8" }}>
-          {["Circuit", "Conduit", "Panel", "Lighting", "Tag", "Bundle"].map((p) => (
+          {["Revit 2021–2025", "Device-locked licenses", "Pay with InstaPay"].map((p) => (
             <div key={p} style={{ display: "flex", padding: "8px 16px", border: "1px solid #2B303A", borderRadius: 12, background: "#12141A" }}>
               {p}
             </div>

@@ -1,73 +1,72 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { Check, Monitor } from "lucide-react";
+import { Check } from "lucide-react";
 import { isLocale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/get-dictionary";
+import { getPublishedProducts } from "@/lib/server/products";
+import { getSettingsSafe } from "@/lib/server/settings";
 import { pageMetadata } from "@/lib/metadata";
+import { fill } from "@/lib/utils";
 import { Eyebrow } from "@/components/ui/section";
 import { LogoMark } from "@/components/brand/logo";
-import { TrialForm } from "@/components/forms/trial-form";
+import { TrialRequestForm } from "@/components/forms/trial-request-form";
 
 export async function generateMetadata({ params }: PageProps<"/[locale]/trial">): Promise<Metadata> {
   const { locale } = await params;
   if (!isLocale(locale)) return {};
-  const dict = await getDictionary(locale);
-  return pageMetadata(locale, "/trial", dict.nav.trial, dict.trial.sub);
+  const [dict, settings] = await Promise.all([getDictionary(locale), getSettingsSafe()]);
+  return pageMetadata(locale, "/trial", fill(dict.trial.title, { days: settings.trialDays }), dict.trial.sub);
 }
 
-export default async function TrialPage({ params }: PageProps<"/[locale]/trial">) {
+export default async function TrialPage({ params, searchParams }: PageProps<"/[locale]/trial">) {
   const { locale } = await params;
   if (!isLocale(locale)) notFound();
-  const dict = await getDictionary(locale);
+  const sp = await searchParams;
+  const [dict, products, settings] = await Promise.all([getDictionary(locale), getPublishedProducts(), getSettingsSafe()]);
   const t = dict.trial;
+  const initial = typeof sp.product === "string" && products.some((p) => p.slug === sp.product) ? sp.product : null;
 
   return (
     <section className="relative overflow-hidden pt-28 sm:pt-36">
       <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
         <div className="bg-blueprint absolute inset-0 [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,#000_30%,transparent_100%)]" />
-        <div className="absolute -top-40 start-1/4 h-[420px] w-[700px] rounded-full bg-[radial-gradient(closest-side,color-mix(in_oklab,var(--accent)_16%,transparent),transparent)]" />
       </div>
       <div className="container-page grid gap-12 lg:grid-cols-12 lg:gap-16">
         <div className="lg:col-span-6">
           <Eyebrow>{t.eyebrow}</Eyebrow>
-          <h1 className="mt-5 text-balance text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">{t.title}</h1>
+          <h1 className="mt-5 text-balance text-4xl font-semibold tracking-[-0.035em] sm:text-5xl">{fill(t.title, { days: settings.trialDays })}</h1>
           <p className="mt-5 max-w-lg text-lg text-muted">{t.sub}</p>
-
-          <div className="mt-10 grid gap-8 sm:grid-cols-2">
-            <div>
-              <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{t.included}</h2>
-              <ul className="mt-4 grid gap-3">
-                {t.includedItems.map((i) => (
-                  <li key={i} className="flex gap-2.5 text-[15px] text-fg-soft">
-                    <Check className="mt-0.5 size-4 shrink-0 text-success" aria-hidden />
-                    {i}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div>
-              <h2 className="font-mono text-[11px] uppercase tracking-[0.18em] text-muted">{t.requirements}</h2>
-              <ul className="mt-4 grid gap-3">
-                {t.requirementItems.map((i) => (
-                  <li key={i} className="flex gap-2.5 text-[15px] text-fg-soft">
-                    <Monitor className="mt-0.5 size-4 shrink-0 text-accent-fg" aria-hidden />
-                    {i}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
+          <ol className="mt-10 grid gap-3">
+            {t.steps.map((s, i) => (
+              <li key={s} className="flex items-center gap-3 text-[15px] text-fg-soft">
+                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-[color-mix(in_oklab,var(--accent)_45%,transparent)] font-mono text-xs text-accent-fg">{i + 1}</span>
+                {s}
+              </li>
+            ))}
+          </ol>
         </div>
         <div className="lg:col-span-6">
           <div className="gradient-border relative overflow-hidden rounded-3xl bg-surface p-7 shadow-[0_30px_80px_-30px_var(--glow)] sm:p-9">
             <div className="mb-7 flex items-center gap-3">
               <LogoMark className="size-11" />
-              <div>
-                <p className="font-semibold">VEYLIX Pro</p>
-                <p className="text-sm text-muted">{dict.hero.microcopy.join(" · ")}</p>
-              </div>
+              <p className="flex items-center gap-2 text-sm text-muted">
+                <Check className="size-4 text-success" aria-hidden />
+                {fill(dict.pricing.trialNote, { days: settings.trialDays })}
+              </p>
             </div>
-            <TrialForm t={t.form} errorsT={dict.checkout.errors} common={dict.common} />
+            {!settings.trialsEnabled ? (
+              <p className="text-muted">{t.disabled}</p>
+            ) : products.length === 0 ? (
+              <p className="text-muted">{t.noProducts}</p>
+            ) : (
+              <TrialRequestForm
+                t={t}
+                download={dict.download}
+                products={products.map((p) => ({ slug: p.slug, name: p.name, hasFile: p.hasFile }))}
+                initialProduct={initial}
+                trialDays={settings.trialDays}
+              />
+            )}
           </div>
         </div>
       </div>

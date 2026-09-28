@@ -584,13 +584,16 @@
   stroke-dasharray: 1;
   stroke-dashoffset: 0;
 }
-.group:hover .art-trace {
+.group:hover .art-trace,
+.art-play .art-trace {
   animation: redraw 1.2s cubic-bezier(0.65, 0, 0.35, 1) both;
 }
-.group:hover .art-delay {
+.group:hover .art-delay,
+.art-play .art-delay {
   animation-delay: 0.15s;
 }
-.group:hover .art-lux {
+.group:hover .art-lux,
+.art-play .art-lux {
   animation: lux 1.2s ease both;
 }
 @keyframes redraw {

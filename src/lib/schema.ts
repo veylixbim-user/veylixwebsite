@@ -1,6 +1,6 @@
 import type { Dictionary } from "@/i18n/dictionaries/en";
 import type { Locale } from "@/i18n/config";
-import { plans, products, type ProductSlug } from "./catalog";
+import type { PublicProduct } from "./server/products";
 import { siteUrl, social } from "./site";
 
 export function organizationSchema() {
@@ -16,37 +16,41 @@ export function organizationSchema() {
   };
 }
 
-export function suiteSchema(locale: Locale, dict: Dictionary) {
-  const prices = [plans.starter, plans.pro, plans.studio].map((p) => p.price!.monthly);
+export function suiteSchema(locale: Locale, dict: Dictionary, products: PublicProduct[]) {
   return {
     "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    name: "VEYLIX Suite",
-    applicationCategory: "DesignApplication",
-    applicationSubCategory: "Autodesk Revit add-in",
-    operatingSystem: "Windows 10, Windows 11",
-    softwareRequirements: "Autodesk Revit 2021–2025",
-    softwareVersion: products.bundle.version,
-    inLanguage: locale === "ar" ? "ar-EG" : "en",
+    "@type": "ItemList",
+    name: "VEYLIX Revit plugins",
     description: dict.meta.description,
-    url: `${siteUrl}/${locale}`,
-    offers: {
-      "@type": "AggregateOffer",
-      priceCurrency: "EGP",
-      lowPrice: Math.min(...prices),
-      highPrice: Math.max(...prices),
-      offerCount: 3,
-      availability: "https://schema.org/InStock",
-    },
-    publisher: { "@type": "Organization", name: "VEYLIX" },
+    itemListElement: products.map((p, i) => ({
+      "@type": "ListItem",
+      position: i + 1,
+      url: `${siteUrl}/${locale}/products/${p.slug}`,
+      name: p.name,
+    })),
   };
 }
 
-export function productSchema(slug: ProductSlug, locale: Locale, dict: Dictionary) {
-  const p = products[slug];
-  const c = dict.products.items[slug];
-  const price = slug === "bundle" ? plans.pro.price!.monthly : plans.starter.price!.monthly;
-  const url = `${siteUrl}/${locale}/products/${slug}`;
+export function productSchema(p: PublicProduct, locale: Locale) {
+  const url = `${siteUrl}/${locale}/products/${p.slug}`;
+  const description = (locale === "ar" ? p.descriptionAr || p.taglineAr : p.descriptionEn || p.taglineEn) || p.name;
+  const price = p.priceMonthly ?? p.priceYearly;
+  const offer =
+    price != null
+      ? {
+          "@type": "Offer",
+          price,
+          priceCurrency: "EGP",
+          availability: "https://schema.org/InStock",
+          url,
+          priceSpecification: {
+            "@type": "UnitPriceSpecification",
+            price,
+            priceCurrency: "EGP",
+            referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: p.priceMonthly != null ? "MON" : "ANN" },
+          },
+        }
+      : undefined;
   return [
     {
       "@context": "https://schema.org",
@@ -54,45 +58,33 @@ export function productSchema(slug: ProductSlug, locale: Locale, dict: Dictionar
       name: p.name,
       applicationCategory: "DesignApplication",
       operatingSystem: "Windows 10, Windows 11",
-      softwareRequirements: "Autodesk Revit 2021–2025",
-      softwareVersion: p.version,
-      description: c.description,
+      softwareRequirements: p.revitVersions ? `Autodesk Revit ${p.revitVersions}` : "Autodesk Revit",
+      softwareVersion: p.version || undefined,
+      description,
+      image: p.images.map((i) => (i.url.startsWith("http") ? i.url : `${siteUrl}${i.url}`)),
       url,
-      offers: { "@type": "Offer", price, priceCurrency: "EGP", availability: "https://schema.org/InStock", url },
+      offers: offer,
     },
     {
       "@context": "https://schema.org",
       "@type": "Product",
       name: p.name,
-      description: c.tagline,
+      description,
       brand: { "@type": "Brand", name: "VEYLIX" },
-      category: "Software > Engineering > BIM",
-      offers: {
-        "@type": "Offer",
-        price,
-        priceCurrency: "EGP",
-        availability: "https://schema.org/InStock",
-        url,
-        priceSpecification: {
-          "@type": "UnitPriceSpecification",
-          price,
-          priceCurrency: "EGP",
-          valueAddedTaxIncluded: false,
-          referenceQuantity: { "@type": "QuantitativeValue", value: 1, unitCode: "MON" },
-        },
-      },
+      image: p.images.map((i) => (i.url.startsWith("http") ? i.url : `${siteUrl}${i.url}`)),
+      offers: offer,
     },
   ];
 }
 
-export function faqSchema(dict: Dictionary) {
+export function faqSchema(dict: Dictionary, activationDays: number) {
   return {
     "@context": "https://schema.org",
     "@type": "FAQPage",
     mainEntity: dict.faq.items.map((f) => ({
       "@type": "Question",
       name: f.q,
-      acceptedAnswer: { "@type": "Answer", text: f.a },
+      acceptedAnswer: { "@type": "Answer", text: f.a.replaceAll("{days}", String(activationDays)) },
     })),
   };
 }

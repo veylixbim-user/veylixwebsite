@@ -1,122 +1,154 @@
-# VEYLIX — Website
+# VEYLIX — Website, store and license server
 
-Marketing and e-commerce site for **VEYLIX**, premium electrical BIM plugins for Autodesk Revit.
-Bilingual (English / Arabic with full RTL), dark-first with a light theme, all pricing in Egyptian Pounds.
+The VEYLIX website sells electrical BIM plugins for Autodesk Revit. It runs in English and Arabic (with full right-to-left layout) and prices everything in Egyptian Pounds.
+It is also the **store** (InstaPay orders), the **download portal** (product key required), the
+**license server** the Revit plugins talk to, and an **admin panel** for running all of it.
 
-> _Power Your BIM Workflow._ — Built by engineers, for engineers.
+Contact / support inbox: **veylixbim@gmail.com**. Customers write here, and every email the site sends comes from it.
 
-## Stack
+---
 
-- **Next.js 16** (App Router, Turbopack, static generation for every page)
-- **React 19**, **TypeScript**
-- **Tailwind CSS v4** (design tokens in `src/app/globals.css`)
-- **Motion** (Framer Motion) for price transitions, counters and in-view triggers
-- **Radix UI** primitives in shadcn/ui-style components (`src/components/ui`)
-- **lucide-react** icons
+## Going live on Vercel (15 minutes)
 
-## Getting started
+1. **Merge the pull request** into `main`. Vercel deploys `main`.
+2. In Vercel open the project → **Storage**:
+   - **Create database → Neon (Postgres)** → connect it to this project. This adds `DATABASE_URL`.
+   - **Create → Blob** → connect it. This adds `BLOB_READ_WRITE_TOKEN` (installers and images live here).
+3. Project → **Settings → Environment Variables**, add:
+   | Name | Value |
+   | --- | --- |
+   | `ADMIN_PASSWORD` | your admin password |
+   | `GMAIL_APP_PASSWORD` | a Gmail **App Password** for veylixbim@gmail.com (see [Email](#email)) |
+4. **Deployments → Redeploy** so the new variables are picked up.
+5. Open `https://<your-site>/admin`, sign in, and add your first plugin.
+
+> The password is **not** in the code: this repository is public, so secrets only live in Vercel.
+> Because the password was shared in a chat, change it once from **Admin → Settings → Admin password**.
+
+---
+
+## The admin panel (`/admin`)
+
+| Page | What you do there |
+| --- | --- |
+| **Dashboard** | Keys, active PCs, pending payments, recent activity and a setup checklist. |
+| **Products** | Add a plugin: name, EN/AR tagline, description and features, prices (monthly / yearly EGP), Revit versions, images, **card artwork**, and the installer. **Choose plugin folder** zips your build folder in the browser. Source code, `obj/`, `backup/`, `.csproj`, `.py`, `build.bat` and similar files are unticked automatically. Each product page also has **Download VeylixLicense.cs** (see below). |
+| **License keys** | 1,000 keys are generated on your first sign-in. Search, filter, **export CSV**, generate more (for one product or all products; trial or paid). **Manage** a key to revoke or restore it, reset its PC, "ask for the key now", or set its expiry, check interval, owner or product. |
+| **Orders** | InstaPay orders waiting for you. Check the transfer in your bank app, then **Payment received — issue keys**. Keys appear on the customer's order page and are emailed to them. You can also reject an order, which emails the customer too. |
+| **Inbox** | Messages from the website's contact forms. Reply from the panel; the message is also forwarded to Gmail. |
+| **Customers** | Everyone who gave an email address: buyers, trial users, newsletter sign-ups and people who wrote in. Email any of them, copy all addresses for BCC, or export CSV. |
+| **Design library** | All the original VEYLIX illustrations and animations: product line-art, icon badges, logo (static and animated), hero circuit traces, command-palette terminal, panel schedule, floor plan, before/after slider, counters, marquee. Replay them and download them as **SVG** (animated or still) or **PNG**. |
+| **Settings** | License check interval (default 30 days), free-trial length and on/off, InstaPay number and name, VAT, email status and a test email, admin password, the license public key. |
+
+### Email
+
+All mail is sent from **veylixbim@gmail.com** through Gmail. This covers:
+- order confirmations with product keys,
+- trial keys,
+- your replies from the admin panel,
+- a notification to you for every new order or message.
+
+Replies from customers land in the same Gmail inbox.
+
+To switch it on:
+1. Sign in to veylixbim@gmail.com and turn on **2-Step Verification** (Google Account → Security).
+2. Open **myaccount.google.com/apppasswords**, create one called "VEYLIX website" and copy the 16 letters.
+3. Add them in Vercel as `GMAIL_APP_PASSWORD`, then redeploy. Use **Settings → Send a test email** to check.
+
+Until then nothing is lost: messages are saved in the Inbox, order keys show on the order page,
+and the Email button offers to open the message in Gmail instead.
+
+---
+
+## How licensing works
+
+1. **Buying:** the customer pays by InstaPay to **01100444395** and enters the transfer reference. You confirm
+   the payment in **Orders**, and a product key (`VLX-XXXX-XXXX-XXXX-XXXX`) is issued.
+2. **Downloading:** `/download` asks for the product key. Only a valid key for that plugin unlocks the installer.
+3. **Activating inside Revit:** the first command asks for the key. The server **locks the key to that PC**
+   and returns a license **signed with an RSA-2048 private key** that never leaves your database.
+4. **Monthly re-check:** the license is valid for the **check interval** (30 days by default, editable in
+   Settings, and per key in Manage). When it runs out, the plugin asks for the key again. The time remaining
+   is shown in the status window, and a reminder appears when less than 3 days are left.
+5. **Free trial:** `/trial` issues a trial key. The trial clock (editable in Settings) starts at first activation,
+   and each PC gets one trial per plugin.
+6. **Changes reach the PC:** while Revit is online, the plugin checks the server every 6 hours.
+   Revoking a key, resetting its PC, shortening the interval or "ask for key now" all apply without a plugin update.
+
+### Adding licensing to a plugin
+
+1. In **Products → your plugin** click **Download VeylixLicense.cs**. The file is generated for that product
+   and already contains the server address, the product id and the public key.
+2. Add it to the Visual Studio project. It needs WinForms for the key window:
+   - .NET Framework 4.8 (Revit 2021–2024): reference `System.Windows.Forms` and `System.Drawing`.
+   - .NET 8 (Revit 2025+): add `<UseWindowsForms>true</UseWindowsForms>` to the `.csproj`.
+3. First line of **every** `IExternalCommand.Execute`:
+   ```csharp
+   if (!Veylix.Licensing.VeylixLicense.Require()) return Result.Cancelled;
+   ```
+4. Optional: a ribbon button that shows the time remaining and lets the user change key:
+   ```csharp
+   Veylix.Licensing.VeylixLicense.ShowStatus();
+   ```
+5. Rebuild, **obfuscate** the DLL (recommended), then upload the build folder in the admin panel.
+
+The file is C# 7.3 with no NuGet packages. It is checked with the Mono C# compiler, and its signature check
+is verified against real server licenses.
+
+### Security
+
+- **Licenses can't be forged or edited.** They are signed server-side (RSA-2048, SHA-256), and the plugin only
+  holds the public key. A replayed server reply is rejected: each request carries a one-time nonce.
+- **One PC per key.** A key is locked to a hardware ID (Windows machine GUID + system volume serial + computer
+  name). The license file is encrypted with Windows DPAPI and ignored on any other PC.
+- **Clock tricks** (setting Windows' date back) are detected and force a key re-entry.
+- **Brute force is throttled.** Activation, status, download, trial, checkout and contact endpoints are rate-limited.
+  Admin sign-in locks out after 5 wrong passwords for 15 minutes.
+- **Admin:**
+  - The password is stored hashed (scrypt).
+  - Sessions are signed httpOnly cookies, and changing the password signs out every session.
+  - Uploads are limited to signed-in admins from the same site.
+- **Installers** are only handed out for a valid key. Your source code is excluded from uploaded folders by default.
+
+No client-side licensing is impossible to crack: someone determined can patch a .NET DLL to skip the check.
+Obfuscating the DLL (e.g. with ConfuserEx or Dotfuscator) makes that much harder. The server side also limits
+the damage: keys are single-PC, expire, and can be revoked.
+
+---
+
+## Local development
 
 ```bash
 npm install
-npm run dev          # http://localhost:3000  → redirects to /en or /ar
-npm run build && npm start
-npm run lint
-npm run typecheck
+cp .env.example .env.local   # set ADMIN_PASSWORD at least
+npm run dev                  # http://localhost:3000  (admin: /admin)
+npm run lint && npm run typecheck && npm run build
 ```
 
-Copy `.env.example` to `.env.local` and fill in what you need. Every integration is optional: the
-site runs fully without any keys, and checkout works in **demo mode** (no charges).
+Without `DATABASE_URL`, an embedded Postgres (PGlite) is created in `.data/pglite`, and uploads go to
+`.data/uploads`. Both are git-ignored.
 
-## What's inside
+## Stack
 
-| Route | What it is |
-| --- | --- |
-| `/[locale]` | Home: hero with animated Revit mockup, trust strip, product grid, "Why VEYLIX" bento, before/after slider, command-palette terminal, live panel-schedule sync, spec sheet, pricing, ROI calculator, testimonials, docs & changelog teaser, FAQ, final CTA |
-| `/[locale]/pricing` | Pricing with monthly/yearly toggle, plan comparison table, ROI calculator, payment FAQ |
-| `/[locale]/products/[slug]` | One page per plugin: `circuit`, `conduit`, `panel`, `lighting`, `tag`, `bundle` |
-| `/[locale]/checkout` | Cart checkout in EGP, 14% VAT, Paymob / Fawry / Vodafone Cash / InstaPay, optional company tax invoice |
-| `/[locale]/checkout/success` | License keys, download portal, printable tax invoice (فاتورة ضريبية) |
-| `/[locale]/trial` | 14-day trial sign-up |
-| `/[locale]/enterprise` | Enterprise features, security, EGP billing, sales contact form |
-| `/[locale]/docs`, `/[locale]/changelog` | Searchable docs portal stub and release notes |
-| `/[locale]/legal/*` | Terms, privacy, refunds, license agreement |
-| `/api/*` | `checkout`, `trial`, `newsletter`, `contact`, `download/[file]` |
-
-Site-wide: sticky glass navbar with product mega-menu, **Ctrl K** command palette, cart drawer
-(persisted in `localStorage`), language toggle (remembers choice via cookie), theme toggle.
+Next.js 16 (App Router, Turbopack), React 19, TypeScript, Tailwind CSS v4, Motion, Radix UI, lucide-react.
+The backend uses Postgres (postgres.js, or PGlite locally), Vercel Blob and Nodemailer (Gmail SMTP).
 
 ## Project layout
 
 ```
 src/
-  app/[locale]/        pages (root layout lives here; html lang/dir set per locale)
-  app/api/             route handlers
-  components/
-    sections/          page sections (hero, pricing, showcase, …)
-    mockups/           code-drawn product visuals (Revit window, floor plan, terminal, panel schedule)
-    layout/            navbar, footer, command menu, toggles
-    ui/                shadcn-style primitives
-  i18n/dictionaries/   en.ts, ar.ts — all copy lives here
-  lib/
-    catalog.ts         products, plans, prices (EGP), VAT rate
-    payments/          Paymob + Fawry adapters (scaffolds) and demo provider
-  proxy.ts             locale detection + redirect (Next 16 "proxy", formerly middleware)
-public/brand/          logo (SVG)
-public/fonts/          IBM Plex Sans Arabic (Arabic subset, SIL OFL)
+  app/[locale]/          public pages: home, products/[slug], pricing, download, trial, checkout,
+                         order/[id] (order status + tax invoice), contact, enterprise, docs, legal
+  app/admin/             admin panel (login + pages under (panel)/), server actions in actions.ts
+  app/api/license/       activate + status endpoints used by the Revit plugin
+  app/api/               download, trial, checkout, contact, newsletter, admin uploads/exports
+  components/            sections, layout, forms, admin, mockups (SVG art), motion
+  i18n/dictionaries/     en.ts, ar.ts — all website copy (ar.ts is type-checked against en.ts)
+  lib/server/            database, schema, products, license keys, orders, auth, mail, storage
+  lib/plugin-kit/        the VeylixLicense.cs template
+  lib/art.ts             the built-in product artwork ids
+  proxy.ts               locale detection (Next 16 "proxy", formerly middleware)
 ```
 
-## Editing content
-
-- **Copy / translations:** `src/i18n/dictionaries/en.ts` and `ar.ts`. The Arabic file is typed against
-  the English one, so a missing key fails the build.
-- **Prices:** `src/lib/catalog.ts` (`plans`). Prices are VAT-exclusive EGP; VAT is `VAT_RATE = 0.14`.
-  The server always recomputes totals from the catalog; client prices are never trusted.
-- **Currency label:** `src/lib/format.ts` (`EGP` in English, `ج.م` in Arabic, always before the number,
-  Western digits with comma thousands).
-- **Brand colors:** CSS variables at the top of `src/app/globals.css` (dark and light themes).
-
-## Before launch — replace placeholders
-
-These are marked in code and must be replaced with real, approved data:
-
-- **Customer logos** in the hero trust strip — `trustedBy` in `src/lib/site.ts`.
-- **Testimonials** — `testimonials.items` in both dictionaries.
-- **Stats** (downloads, countries, rating) — `hero.stats` in both dictionaries.
-- **Changelog entries, docs articles, legal text** — review with your team and counsel.
-- **Social links & emails** — `src/lib/site.ts`.
-- **Seller details on invoices** — `SELLER_LEGAL_NAME`, `SELLER_TAX_ID`, `SELLER_ADDRESS`.
-- **Demo video** — the "Watch 90s demo" dialog currently offers a live demo booking instead.
-
-## Going live with payments
-
-`src/lib/payments/` contains a demo provider plus **scaffolded** Paymob and Fawry adapters.
-They activate automatically once their env vars are set; until then checkout stays in demo mode
-and says so on the page.
-
-1. Implement `paymob.createPayment` (Intention API → hosted checkout redirect) and
-   `fawry.createPayment` (reference-code charge) following each provider's current API reference.
-2. Add webhook routes that verify the provider signature/HMAC and **only then** issue license keys
-   and send the email (the checkout route already withholds keys for unpaid orders).
-3. Persist orders in a database (the demo stores the last order in `sessionStorage`).
-4. For B2B customers, submit invoices to the Egyptian Tax Authority e-invoicing system.
-
-Transactional email and the newsletter use Resend's REST API when `RESEND_API_KEY` is set.
-Installer downloads redirect to `DOWNLOAD_URL_SUITE` / `DOWNLOAD_URL_MSI`.
-
-## SEO & accessibility
-
-- Per-locale metadata, canonical URLs and `hreflang` alternates (`/en`, `/ar`, `x-default`)
-- JSON-LD: `Organization`, `SoftwareApplication`, `Product` (`priceCurrency: "EGP"`), `FAQPage`
-- `sitemap.xml`, `robots.txt`, generated OpenGraph images per locale
-- Semantic landmarks, skip link, keyboard-operable menus, dialogs, sliders and accordion,
-  `prefers-reduced-motion` respected, WCAG AA contrast
-
-Lighthouse on the production build (home page): desktop 100 / 100 / 100 / 100 (EN) and
-99 / 100 / 100 / 100 (AR). Simulated mobile (slow 4G, 4× CPU) scores about 83–90 for performance, with
-100 on accessibility, best practices and SEO.
-
-## Deploying
-
-Any Node host that runs Next.js 16 works (Vercel, Netlify, a Docker container, …). Set
-`NEXT_PUBLIC_SITE_URL` to the production origin so canonical URLs, the sitemap and OpenGraph tags
-point to the right domain.
+Copy and translations live in `src/i18n/dictionaries/`. Product content, prices and images are managed in the
+admin panel. Brand colours are the CSS variables at the top of `src/app/globals.css`.

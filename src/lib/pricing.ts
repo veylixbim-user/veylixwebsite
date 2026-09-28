@@ -1,30 +1,24 @@
-import { plans, VAT_RATE, type BillingCycle, type PluginSlug, type PurchasablePlanId } from "./catalog";
+import type { Billing, CatalogItem } from "./catalog-types";
 
 export type CartItem = {
   id: string;
-  plan: PurchasablePlanId;
-  billing: BillingCycle;
+  productId: string;
+  billing: Billing;
   quantity: number;
-  /** Starter licenses one plugin of the customer's choice. */
-  plugin?: PluginSlug;
 };
 
-export function unitPrice(item: Pick<CartItem, "plan" | "billing">) {
-  const price = plans[item.plan].price;
-  if (!price) throw new Error(`Plan ${item.plan} has no list price`);
-  return price[item.billing];
+export function cartItemId(productId: string, billing: Billing) {
+  return `${productId}:${billing}`;
 }
 
-export function lineTotal(item: CartItem) {
-  return unitPrice(item) * item.quantity;
+export function priceOf(product: CatalogItem | undefined, billing: Billing) {
+  if (!product) return null;
+  return billing === "yearly" ? product.priceYearly : product.priceMonthly;
 }
 
-export function totals(items: CartItem[]) {
-  const subtotal = items.reduce((sum, item) => sum + lineTotal(item), 0);
-  const vat = Math.round(subtotal * VAT_RATE * 100) / 100;
+/** Client-side estimate for the cart UI. The server always re-prices orders from the database. */
+export function cartTotals(items: CartItem[], catalog: Map<string, CatalogItem>, vatRate: number) {
+  const subtotal = items.reduce((sum, i) => sum + (priceOf(catalog.get(i.productId), i.billing) ?? 0) * i.quantity, 0);
+  const vat = Math.round(subtotal * vatRate) / 100;
   return { subtotal, vat, total: subtotal + vat };
-}
-
-export function cartItemId(plan: PurchasablePlanId, billing: BillingCycle, plugin?: PluginSlug) {
-  return [plan, billing, plugin].filter(Boolean).join(":");
 }

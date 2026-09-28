@@ -1,29 +1,25 @@
-import { pluginSlugs, purchasablePlans, type PluginSlug, type PurchasablePlanId } from "./catalog";
+import type { Billing } from "./catalog-types";
 import { cartItemId, type CartItem } from "./pricing";
 
-const KEY = "veylix-cart-v1";
+const KEY = "veylix-cart-v2";
 const EMPTY: CartItem[] = [];
+const PRODUCT_ID = /^p_[a-z0-9]{6,32}$/;
 
 let items: CartItem[] = EMPTY;
 let loaded = false;
 const listeners = new Set<() => void>();
 
-/** Validates untrusted cart data (localStorage, request bodies). Pure — safe on the server. */
-export function sanitize(value: unknown): CartItem[] {
+function sanitize(value: unknown): CartItem[] {
   if (!Array.isArray(value)) return EMPTY;
   const out: CartItem[] = [];
-  for (const raw of value) {
+  for (const raw of value.slice(0, 20)) {
     if (!raw || typeof raw !== "object") continue;
     const r = raw as Record<string, unknown>;
-    const plan = r.plan as PurchasablePlanId;
-    const billing = r.billing;
-    const plugin = r.plugin as PluginSlug | undefined;
-    const quantity = Math.min(99, Math.max(1, Math.floor(Number(r.quantity) || 1)));
-    if (!(purchasablePlans as readonly string[]).includes(plan)) continue;
-    if (billing !== "monthly" && billing !== "yearly") continue;
-    if (plan === "starter" && !(pluginSlugs as readonly string[]).includes(plugin ?? "")) continue;
-    const p = plan === "starter" ? plugin : undefined;
-    out.push({ id: cartItemId(plan, billing, p), plan, billing, quantity, plugin: p });
+    const productId = String(r.productId ?? "");
+    const billing = r.billing === "yearly" ? "yearly" : r.billing === "monthly" ? "monthly" : null;
+    if (!PRODUCT_ID.test(productId) || !billing) continue;
+    const quantity = Math.min(50, Math.max(1, Math.floor(Number(r.quantity) || 1)));
+    out.push({ id: cartItemId(productId, billing), productId, billing, quantity });
   }
   return out;
 }
@@ -75,20 +71,16 @@ export const cartStore = {
   getServerSnapshot() {
     return EMPTY;
   },
-  add(input: Omit<CartItem, "id" | "quantity"> & { quantity?: number }) {
+  add(productId: string, billing: Billing, quantity = 1) {
     load();
-    const plugin = input.plan === "starter" ? input.plugin : undefined;
-    const id = cartItemId(input.plan, input.billing, plugin);
+    const id = cartItemId(productId, billing);
     const existing = items.find((i) => i.id === id);
-    if (existing) {
-      commit(items.map((i) => (i.id === id ? { ...i, quantity: Math.min(99, i.quantity + (input.quantity ?? 1)) } : i)));
-    } else {
-      commit([...items, { id, plan: input.plan, billing: input.billing, plugin, quantity: input.quantity ?? 1 }]);
-    }
+    if (existing) commit(items.map((i) => (i.id === id ? { ...i, quantity: Math.min(50, i.quantity + quantity) } : i)));
+    else commit([...items, { id, productId, billing, quantity }]);
   },
   setQuantity(id: string, quantity: number) {
     if (quantity < 1) return cartStore.remove(id);
-    commit(items.map((i) => (i.id === id ? { ...i, quantity: Math.min(99, Math.floor(quantity)) } : i)));
+    commit(items.map((i) => (i.id === id ? { ...i, quantity: Math.min(50, Math.floor(quantity)) } : i)));
   },
   remove(id: string) {
     commit(items.filter((i) => i.id !== id));

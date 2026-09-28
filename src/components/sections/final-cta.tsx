@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CalendarClock } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 import type { Dictionary } from "@/i18n/dictionaries/en";
 import type { Locale } from "@/i18n/config";
 import { href } from "@/lib/links";
@@ -21,14 +21,14 @@ export function FinalCta({ locale, dict }: { locale: Locale; dict: Dictionary })
           <p className="mx-auto mt-5 max-w-xl text-pretty text-lg text-muted">{t.sub}</p>
           <div className="mt-10 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button asChild size="lg" className="w-full sm:w-auto">
-              <Link href={href(locale, "/trial")}>
+              <Link href={href(locale, "/#products")}>
                 {t.primary}
                 <ArrowRight className="rtl:-scale-x-100" aria-hidden />
               </Link>
             </Button>
             <Button asChild size="lg" variant="ghost" className="w-full bg-bg/30 sm:w-auto">
-              <Link href={href(locale, "/enterprise#contact")}>
-                <CalendarClock aria-hidden />
+              <Link href={href(locale, "/trial")}>
+                <Sparkles aria-hidden />
                 {t.secondary}
               </Link>
             </Button>

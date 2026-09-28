@@ -4,11 +4,11 @@ import * as React from "react";
 import { useRouter } from "next/navigation";
 import { Dialog } from "radix-ui";
 import { ArrowRight, BookOpen, CornerDownLeft, FileText, Search } from "lucide-react";
-import type { ProductSlug } from "@/lib/catalog";
 import { cn } from "@/lib/utils";
-import { ProductIcon } from "@/components/brand/product-icon";
+import { ProductThumb } from "@/components/brand/product-thumb";
 import { Kbd } from "@/components/ui/section";
 import { useUI } from "@/components/providers/site-providers";
+import type { ArtId } from "@/lib/art";
 
 export type CommandItem = {
   id: string;
@@ -16,7 +16,7 @@ export type CommandItem = {
   label: string;
   hint?: string;
   href: string;
-  product?: { slug: ProductSlug; accent: "cyan" | "violet" | "mint" };
+  product?: { image: string | null; art: ArtId | null };
   keywords?: string;
 };
 
@@ -141,7 +141,7 @@ export function CommandMenu({ items, placeholder, empty, groups }: Props) {
                         )}
                       >
                         {item.product ? (
-                          <ProductIcon slug={item.product.slug} accent={item.product.accent} size="sm" />
+                          <ProductThumb image={item.product.image} art={item.product.art} name={item.label} className="size-8 rounded-lg" />
                         ) : (
                           <span className="inline-flex size-8 items-center justify-center rounded-xl border border-border bg-surface-2 text-muted">
                             {item.group === "help" ? <BookOpen className="size-4" aria-hidden /> : <FileText className="size-4" aria-hidden />}

@@ -7,23 +7,23 @@ import { Dialog, NavigationMenu } from "radix-ui";
 import { ArrowUpRight, ChevronDown, Menu, Search, ShoppingBag, X } from "lucide-react";
 import type { Dictionary } from "@/i18n/dictionaries/en";
 import type { Locale } from "@/i18n/config";
-import type { ProductSlug } from "@/lib/catalog";
 import { href } from "@/lib/links";
 import { cn, fill } from "@/lib/utils";
 import { Logo } from "@/components/brand/logo";
-import { ProductIcon } from "@/components/brand/product-icon";
+import { ProductThumb } from "@/components/brand/product-thumb";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/section";
 import { useCart, useUI } from "@/components/providers/site-providers";
 import { ThemeToggle } from "./theme-toggle";
 import { LanguageToggle } from "./language-toggle";
+import type { ArtId } from "@/lib/art";
 
 export type NavProduct = {
-  slug: ProductSlug;
+  slug: string;
   name: string;
   tagline: string;
-  category: string;
-  accent: "cyan" | "violet" | "mint";
+  image: string | null;
+  art: ArtId | null;
 };
 
 type Props = {
@@ -49,9 +49,9 @@ export function Navbar({ locale, nav, products }: Props) {
 
   const links = [
     { label: nav.pricing, path: "/pricing" },
+    { label: nav.freeTrial, path: "/trial" },
     { label: nav.docs, path: "/docs" },
-    { label: nav.changelog, path: "/changelog" },
-    { label: nav.enterprise, path: "/enterprise" },
+    { label: nav.teams, path: "/enterprise" },
   ];
 
   const isActive = (path: string) => pathname === href(locale, path) || pathname?.startsWith(href(locale, path) + "/");
@@ -87,6 +87,7 @@ export function Navbar({ locale, nav, products }: Props) {
                       </Link>
                     </NavigationMenu.Link>
                   </div>
+                  {products.length === 0 ? <p className="px-5 py-6 text-sm text-muted">{nav.noProducts}</p> : null}
                   <ul className="grid grid-cols-2 gap-1 p-2">
                     {products.map((p) => (
                       <li key={p.slug}>
@@ -95,11 +96,10 @@ export function Navbar({ locale, nav, products }: Props) {
                             href={href(locale, `/products/${p.slug}`)}
                             className="group flex gap-3 rounded-xl p-3 transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
                           >
-                            <ProductIcon slug={p.slug} accent={p.accent} size="sm" />
+                            <ProductThumb image={p.image} art={p.art} name={p.name} className="size-10" />
                             <span className="min-w-0">
                               <span className="flex items-center gap-2 text-sm font-medium text-fg">
                                 <span className="ltr">{p.name}</span>
-                                {p.slug === "bundle" ? <span className="rounded-full bg-accent/15 px-1.5 py-px text-[10px] font-semibold text-accent-fg">★</span> : null}
                               </span>
                               <span className="mt-0.5 line-clamp-2 block text-xs leading-relaxed text-muted">{p.tagline}</span>
                             </span>
@@ -160,10 +160,7 @@ export function Navbar({ locale, nav, products }: Props) {
             ) : null}
           </button>
           <Button asChild size="sm" className="ms-2 hidden sm:inline-flex">
-            <Link href={href(locale, "/trial")}>
-              <span className="hidden xl:inline">{nav.trial}</span>
-              <span className="xl:hidden">{nav.trialShort}</span>
-            </Link>
+            <Link href={href(locale, "/download")}>{nav.download}</Link>
           </Button>
 
           {/* Mobile menu */}
@@ -201,7 +198,7 @@ export function Navbar({ locale, nav, products }: Props) {
                             onClick={() => setMobileOpen(false)}
                             className="flex items-center gap-3 rounded-xl p-2.5 hover:bg-surface-2"
                           >
-                            <ProductIcon slug={p.slug} accent={p.accent} size="sm" />
+                            <ProductThumb image={p.image} art={p.art} name={p.name} className="size-9" />
                             <span className="ltr text-sm font-medium">{p.name}</span>
                           </Link>
                         </li>
@@ -226,8 +223,8 @@ export function Navbar({ locale, nav, products }: Props) {
                     <ThemeToggle label={nav.themeToggle} className="border border-border" />
                   </div>
                   <Button asChild size="lg" className="w-full">
-                    <Link href={href(locale, "/trial")} onClick={() => setMobileOpen(false)}>
-                      {nav.trial}
+                    <Link href={href(locale, "/download")} onClick={() => setMobileOpen(false)}>
+                      {nav.download}
                     </Link>
                   </Button>
                 </div>

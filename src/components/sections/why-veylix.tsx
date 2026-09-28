@@ -1,6 +1,6 @@
 import { FileBox, FileSpreadsheet, RefreshCw, ShieldCheck, Sparkles, Timer, WifiOff, Workflow, Check } from "lucide-react";
 import type { Dictionary } from "@/i18n/dictionaries/en";
-import { revitVersions } from "@/lib/catalog";
+import { REVIT_VERSIONS as revitVersions } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { SectionHeader } from "@/components/ui/section";
 import { Reveal } from "@/components/motion/reveal";

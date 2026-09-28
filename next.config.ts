@@ -10,6 +10,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // Embedded Postgres for local development ships a WASM binary; load it from node_modules.
+  serverExternalPackages: ["@electric-sql/pglite"],
   reactStrictMode: true,
   async headers() {
     return [

@@ -9,12 +9,12 @@ import { cn } from "@/lib/utils";
 const TABS = ["File", "Architecture", "Systems", "Insert", "Annotate", "Analyze", "View", "Manage"];
 
 const GROUPS = [
-  { label: "Distribution", tools: [{ icon: Zap, name: "Circuit", active: true }, { icon: Scale, name: "Balance" }] },
-  { label: "Routing", tools: [{ icon: Route, name: "Conduit" }, { icon: Cable, name: "Tray" }] },
-  { label: "Documentation", tools: [{ icon: PanelsTopLeft, name: "Panel" }, { icon: GitBranch, name: "One-line" }] },
-  { label: "Design", tools: [{ icon: Lightbulb, name: "Lighting" }] },
+  { label: "Wiring", tools: [{ icon: Zap, name: "Wire", active: true }, { icon: Scale, name: "Balance" }] },
+  { label: "Routing", tools: [{ icon: Route, name: "Route" }, { icon: Cable, name: "Tray" }] },
+  { label: "Schedules", tools: [{ icon: PanelsTopLeft, name: "Panels" }, { icon: GitBranch, name: "One-line" }] },
+  { label: "Lighting", tools: [{ icon: Lightbulb, name: "Layout" }] },
   { label: "QA / QC", tools: [{ icon: Tags, name: "Tag" }, { icon: ClipboardCheck, name: "Audit" }] },
-  { label: "Suite", tools: [{ icon: Boxes, name: "Rules" }] },
+  { label: "License", tools: [{ icon: Boxes, name: "Status" }] },
 ];
 
 const SCHEDULE = [

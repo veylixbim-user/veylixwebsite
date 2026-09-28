@@ -6,25 +6,23 @@ import { Minus, Plus, ShoppingBag, Trash2, X } from "lucide-react";
 import type { Dictionary } from "@/i18n/dictionaries/en";
 import type { Locale } from "@/i18n/config";
 import { cartStore } from "@/lib/cart-store";
-import { products, type PurchasablePlanId } from "@/lib/catalog";
 import { formatEGP } from "@/lib/format";
 import { href } from "@/lib/links";
-import { lineTotal, totals, unitPrice } from "@/lib/pricing";
+import { cartTotals, priceOf } from "@/lib/pricing";
 import { Button } from "@/components/ui/button";
-import { ProductIcon } from "@/components/brand/product-icon";
+import { ProductThumb } from "@/components/brand/product-thumb";
 import { useCart, useUI } from "@/components/providers/site-providers";
 
 type Props = {
   locale: Locale;
   t: Dictionary["cart"];
-  common: Pick<Dictionary["common"], "monthly" | "yearly" | "perMonth" | "perYear" | "exclVat">;
-  planNames: Record<PurchasablePlanId, string>;
+  common: Pick<Dictionary["common"], "monthly" | "yearly" | "close">;
 };
 
-export function CartDrawer({ locale, t, common, planNames }: Props) {
-  const { cartOpen, setCartOpen } = useUI();
+export function CartDrawer({ locale, t, common }: Props) {
+  const { cartOpen, setCartOpen, catalog, shop } = useUI();
   const items = useCart();
-  const { subtotal } = totals(items);
+  const { subtotal } = cartTotals(items, catalog, shop.vatRate);
 
   return (
     <Dialog.Root open={cartOpen} onOpenChange={setCartOpen}>
@@ -38,7 +36,7 @@ export function CartDrawer({ locale, t, common, planNames }: Props) {
             </Dialog.Title>
             <Dialog.Description className="sr-only">{t.vatNote}</Dialog.Description>
             <Dialog.Close asChild>
-              <button type="button" aria-label="Close" className="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg">
+              <button type="button" aria-label={common.close} className="inline-flex size-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-fg">
                 <X className="size-5" aria-hidden />
               </button>
             </Dialog.Close>
@@ -58,66 +56,35 @@ export function CartDrawer({ locale, t, common, planNames }: Props) {
             <>
               <ul className="flex-1 divide-y divide-border overflow-y-auto px-5">
                 {items.map((item) => {
-                  const plugin = item.plugin ? products[item.plugin] : null;
+                  const product = catalog.get(item.productId);
+                  const unit = priceOf(product, item.billing);
                   return (
                     <li key={item.id} className="flex gap-4 py-5">
-                      <ProductIcon slug={item.plugin ?? "bundle"} accent={plugin?.accent ?? "cyan"} size="md" />
+                      <ProductThumb image={product?.image} art={product?.art} name={product?.name ?? ""} />
                       <div className="min-w-0 flex-1">
                         <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="font-medium">
-                              <span className="ltr">VEYLIX {planNames[item.plan]}</span>
-                            </p>
-                            <p className="mt-0.5 text-xs text-muted">
-                              {plugin ? (
-                                <>
-                                  {t.plugin}: <span className="ltr">{plugin.name}</span> ·{" "}
-                                </>
-                              ) : null}
-                              {item.billing === "monthly" ? common.monthly : common.yearly}
-                            </p>
+                          <div className="min-w-0">
+                            <p className="ltr truncate font-medium">{product?.name ?? t.unavailable}</p>
+                            <p className="mt-0.5 text-xs text-muted">{item.billing === "monthly" ? common.monthly : common.yearly}</p>
                           </div>
-                          <p className="text-end text-sm font-semibold tabular-nums">
-                            {formatEGP(lineTotal(item), locale)}
-                          </p>
+                          <p className="text-end text-sm font-semibold tabular-nums">{unit != null ? formatEGP(unit * item.quantity, locale) : "—"}</p>
                         </div>
                         <div className="mt-3 flex items-center justify-between">
                           <div className="inline-flex items-center rounded-lg border border-border" role="group" aria-label={t.quantity}>
-                            <button
-                              type="button"
-                              aria-label={t.decrease}
-                              onClick={() => cartStore.setQuantity(item.id, item.quantity - 1)}
-                              className="inline-flex size-8 items-center justify-center text-muted hover:text-fg"
-                            >
+                            <button type="button" aria-label={t.decrease} onClick={() => cartStore.setQuantity(item.id, item.quantity - 1)} className="inline-flex size-8 items-center justify-center text-muted hover:text-fg">
                               <Minus className="size-3.5" aria-hidden />
                             </button>
                             <span className="w-8 text-center text-sm tabular-nums" aria-live="polite">
                               {item.quantity}
                             </span>
-                            <button
-                              type="button"
-                              aria-label={t.increase}
-                              onClick={() => cartStore.setQuantity(item.id, item.quantity + 1)}
-                              className="inline-flex size-8 items-center justify-center text-muted hover:text-fg"
-                            >
+                            <button type="button" aria-label={t.increase} onClick={() => cartStore.setQuantity(item.id, item.quantity + 1)} className="inline-flex size-8 items-center justify-center text-muted hover:text-fg">
                               <Plus className="size-3.5" aria-hidden />
                             </button>
                           </div>
-                          <div className="flex items-center gap-3">
-                            {item.quantity > 1 ? (
-                              <span className="text-xs text-muted tabular-nums">
-                                {formatEGP(unitPrice(item), locale)} {t.each}
-                              </span>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={() => cartStore.remove(item.id)}
-                              className="inline-flex items-center gap-1 text-xs text-muted hover:text-danger"
-                            >
-                              <Trash2 className="size-3.5" aria-hidden />
-                              {t.remove}
-                            </button>
-                          </div>
+                          <button type="button" onClick={() => cartStore.remove(item.id)} className="inline-flex items-center gap-1 text-xs text-muted hover:text-danger">
+                            <Trash2 className="size-3.5" aria-hidden />
+                            {t.remove}
+                          </button>
                         </div>
                       </div>
                     </li>

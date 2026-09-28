@@ -1,107 +1,59 @@
-import { sanitize } from "@/lib/cart-store";
-import { plans } from "@/lib/catalog";
-import type { Order } from "@/lib/order";
-import { providerFor, isDemoMode, type PaymentMethod } from "@/lib/payments";
-import { lineTotal, totals, unitPrice } from "@/lib/pricing";
-import { badRequest, readJson, sendEmail } from "@/lib/server/http";
-import { invoiceNumber, licenseKey, orderId } from "@/lib/server/ids";
-import { clean, EG_MOBILE_RE, EMAIL_RE, isStudentEmail, normalizePhone, normalizeTaxId, TAX_ID_RE } from "@/lib/validation";
+import { createOrder, type CartLine } from "@/lib/server/orders";
+import { notifyInbox } from "@/lib/server/mail";
+import { siteUrl } from "@/lib/site";
+import { getKey } from "@/lib/server/license-keys";
+import { ipFrom, rateLimit } from "@/lib/server/rate-limit";
+import { badRequest, readJson } from "@/lib/server/http";
+import { clean, EG_MOBILE_RE, EMAIL_RE, normalizePhone, normalizeTaxId, TAX_ID_RE } from "@/lib/validation";
 
-const METHODS: PaymentMethod[] = ["card", "fawry", "wallet", "instapay"];
-
+/** Creates a pending InstaPay order. Keys are issued when the admin confirms the transfer. */
 export async function POST(request: Request) {
+  if (!(await rateLimit(`checkout:${ipFrom(request)}`, 10, 600))) return Response.json({ ok: false, errors: { form: "rate_limited" } }, { status: 429 });
   const body = await readJson(request);
   if (!body) return badRequest("invalid_body");
 
-  // Prices are always recomputed server-side from the catalog; client totals are ignored.
-  const items = sanitize(body.items);
-  if (items.length === 0) return badRequest("empty_cart");
+  const rawLines = Array.isArray(body.items) ? (body.items as Record<string, unknown>[]) : [];
+  const lines: CartLine[] = rawLines
+    .map((l) => ({ productId: clean(l?.productId, 40), billing: l?.billing === "yearly" ? ("yearly" as const) : ("monthly" as const), quantity: Number(l?.quantity) || 1 }))
+    .filter((l) => l.productId);
 
   const customer = (body.customer ?? {}) as Record<string, unknown>;
   const name = clean(customer.name, 120);
   const email = clean(customer.email, 160).toLowerCase();
   const phone = normalizePhone(clean(customer.phone, 30));
-  const method = body.method as PaymentMethod;
+  const paymentRef = clean(body.paymentRef, 80);
+  const renewKey = clean(body.renewKey, 40) || null;
 
   const errors: Record<string, string> = {};
   if (name.length < 2) errors.name = "name";
   if (!EMAIL_RE.test(email)) errors.email = "email";
   if (!EG_MOBILE_RE.test(phone)) errors.phone = "phone";
-  if (!METHODS.includes(method)) errors.method = "generic";
+  if (paymentRef.length < 4) errors.paymentRef = "paymentRef";
 
-  let business: Order["business"];
+  let business: { company: string; taxId: string; address: string } | null = null;
   if (body.business && typeof body.business === "object") {
     const b = body.business as Record<string, unknown>;
     const company = clean(b.company, 160);
     const taxId = normalizeTaxId(clean(b.taxId, 20));
-    const address = clean(b.address, 240);
     if (company.length < 2) errors.company = "company";
     if (!TAX_ID_RE.test(taxId)) errors.taxId = "taxId";
-    business = { company, taxId, address };
+    business = { company, taxId, address: clean(b.address, 240) };
   }
 
-  if (items.some((i) => i.plan === "student") && !isStudentEmail(clean(body.studentEmail, 160))) {
-    errors.studentEmail = "studentEmail";
+  if (renewKey) {
+    const units = lines.reduce((n, l) => n + Math.max(1, Math.floor(l.quantity)), 0);
+    const existing = await getKey(renewKey);
+    if (!existing || existing.revoked || units !== 1) errors.renewKey = "renewKey";
   }
+  if (Object.keys(errors).length) return badRequest(errors);
 
-  if (Object.keys(errors).length > 0) return badRequest(errors);
-
-  const { subtotal, vat, total } = totals(items);
-  const id = orderId();
-  const provider = providerFor(method);
-
-  let payment;
-  try {
-    payment = await provider.createPayment(
-      { orderId: id, amount: total, customer: { name, email, phone }, description: `VEYLIX order ${id}` },
-      method,
-    );
-  } catch (err) {
-    console.error("[checkout] payment provider error", err);
-    return Response.json({ ok: false, errors: { form: "generic" } }, { status: 502 });
-  }
-
-  if (payment.status === "redirect") {
-    // Real providers: licenses are issued by the webhook after payment confirmation.
-    return Response.json({ ok: true, redirect: payment.url });
-  }
-
-  const order: Order = {
-    id,
-    createdAt: new Date().toISOString(),
-    status: payment.status === "paid" ? "paid" : "pending",
-    method,
-    fawryReference: payment.status === "pending" ? payment.reference : undefined,
-    customer: { name, email, phone },
-    business,
-    items: items.map((item) => {
-      const seats = (plans[item.plan].seats ?? 1) * item.quantity;
-      return {
-        ...item,
-        unitPrice: unitPrice(item),
-        lineTotal: lineTotal(item),
-        // Keys are only released once payment is confirmed.
-        licenseKeys: payment.status === "paid" ? Array.from({ length: Math.min(seats, 50) }, () => licenseKey()) : [],
-      };
-    }),
-    subtotal,
-    vat,
-    total,
-    invoice: {
-      number: invoiceNumber(),
-      seller: {
-        name: process.env.SELLER_LEGAL_NAME ?? "VEYLIX",
-        taxId: process.env.SELLER_TAX_ID ?? "",
-        address: process.env.SELLER_ADDRESS ?? "Cairo, Egypt",
-      },
-    },
-    demo: isDemoMode(),
-  };
-
-  if (order.status === "paid") {
-    const keys = order.items.flatMap((i) => i.licenseKeys).join("\n");
-    await sendEmail(email, `Your VEYLIX license — ${id}`, `Thanks for your order ${id}.\n\nLicense keys:\n${keys}\n\nInvoice: ${order.invoice.number}`).catch(() => undefined);
-  }
-
-  return Response.json({ ok: true, order });
+  const order = await createOrder({ lines, customer: { name, email, phone }, business, paymentRef, renewKey });
+  if (!order) return badRequest("empty_cart");
+  const lines2 = order.items.map((i) => `${i.quantity} × ${i.name} (${i.billing})`).join("\n");
+  await notifyInbox(
+    `New InstaPay order ${order.id} — EGP ${order.total.toLocaleString("en-US")}`,
+    `${name} <${email}> · ${phone}\nInstaPay reference: ${paymentRef}\nTotal: EGP ${order.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}\n\n${lines2}${renewKey ? `\n\nRenews key: ${renewKey}` : ""}\n\nCheck the transfer in your InstaPay app, then approve it in Admin → Orders:\n${siteUrl}/admin/orders?status=pending`,
+    email,
+  ).catch(() => undefined);
+  return Response.json({ ok: true, id: order.id, token: order.accessToken });
 }

@@ -1,9 +1,10 @@
-"use client";
+import type { ArtId } from "@/lib/art";
 
-import type { ProductSlug } from "@/lib/catalog";
-
-/** Small line-art illustrations for the product cards. Pure SVG, animated on card hover via CSS. */
-export function ProductArt({ slug }: { slug: ProductSlug }) {
+/**
+ * Line-art illustrations for product cards. Pure SVG (renders on the server), animated via CSS when a
+ * parent `.group` is hovered or an ancestor carries `.art-play`.
+ */
+export function ProductArt({ art }: { art: ArtId }) {
   const common = {
     viewBox: "0 0 240 120",
     className: "h-full w-full",
@@ -11,7 +12,7 @@ export function ProductArt({ slug }: { slug: ProductSlug }) {
     "aria-hidden": true,
   } as const;
 
-  switch (slug) {
+  switch (art) {
     case "circuit":
       return (
         <svg {...common}>
@@ -74,7 +75,7 @@ export function ProductArt({ slug }: { slug: ProductSlug }) {
       return (
         <svg {...common}>
           <defs>
-            <radialGradient id="lux" cx="50%" cy="50%" r="50%">
+            <radialGradient id="vx-lux" cx="50%" cy="50%" r="50%">
               <stop offset="0" stopColor="var(--success)" stopOpacity=".35" />
               <stop offset="1" stopColor="var(--success)" stopOpacity="0" />
             </radialGradient>
@@ -82,7 +83,7 @@ export function ProductArt({ slug }: { slug: ProductSlug }) {
           {[0, 1, 2].map((r) =>
             [0, 1, 2, 3].map((c) => (
               <g key={`${r}-${c}`} className="art-lux" style={{ animationDelay: `${(r + c) * 120}ms` }}>
-                <circle cx={48 + c * 48} cy={24 + r * 36} r="26" fill="url(#lux)" />
+                <circle cx={48 + c * 48} cy={24 + r * 36} r="26" fill="url(#vx-lux)" />
                 <rect x={42 + c * 48} y={18 + r * 36} width="12" height="12" rx="2" stroke="var(--success)" strokeWidth="1.2" />
               </g>
             )),

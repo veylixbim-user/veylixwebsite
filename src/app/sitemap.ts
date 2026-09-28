@@ -1,17 +1,29 @@
 import type { MetadataRoute } from "next";
 import { locales } from "@/i18n/config";
-import { productSlugs } from "@/lib/catalog";
+import { getPublishedProducts } from "@/lib/server/products";
 import { siteUrl } from "@/lib/site";
 
-const paths = ["", "/pricing", "/docs", "/changelog", "/enterprise", "/trial", ...productSlugs.map((s) => `/products/${s}`), "/legal/terms", "/legal/privacy", "/legal/refunds", "/legal/eula"];
+export const revalidate = 3600;
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  return paths.flatMap((path) =>
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const products = await getPublishedProducts();
+  const pages = [
+    { path: "", priority: 1, lastModified: new Date() },
+    { path: "/pricing", priority: 0.9, lastModified: new Date() },
+    ...products.map((p) => ({ path: `/products/${p.slug}`, priority: 0.9, lastModified: new Date(p.updatedAt) })),
+    { path: "/download", priority: 0.6, lastModified: new Date() },
+    { path: "/trial", priority: 0.7, lastModified: new Date() },
+    { path: "/enterprise", priority: 0.5, lastModified: new Date() },
+    { path: "/contact", priority: 0.5, lastModified: new Date() },
+    { path: "/docs", priority: 0.5, lastModified: new Date() },
+    ...["terms", "privacy", "refunds", "eula"].map((d) => ({ path: `/legal/${d}`, priority: 0.2, lastModified: new Date("2026-09-28") })),
+  ];
+  return pages.flatMap(({ path, priority, lastModified }) =>
     locales.map((locale) => ({
       url: `${siteUrl}/${locale}${path}`,
-      lastModified: new Date("2026-09-15"),
-      changeFrequency: path === "" || path === "/changelog" ? ("weekly" as const) : ("monthly" as const),
-      priority: path === "" ? 1 : path === "/pricing" || path.startsWith("/products") ? 0.9 : 0.6,
+      lastModified,
+      changeFrequency: "weekly" as const,
+      priority,
       alternates: { languages: Object.fromEntries(locales.map((l) => [l, `${siteUrl}/${l}${path}`])) },
     })),
   );

@@ -2,7 +2,7 @@
   "name": "veylix-website",
   "version": "1.0.0",
   "private": true,
-  "description": "VEYLIX \u2014 premium electrical BIM plugins for Autodesk Revit. Bilingual (EN/AR) marketing and e-commerce site.",
+  "description": "VEYLIX — premium electrical BIM plugins for Autodesk Revit. Bilingual (EN/AR) marketing and e-commerce site.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -14,11 +14,16 @@
     "node": ">=20.9.0"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@vercel/blob": "^2.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "lucide-react": "^1.48.0",
     "motion": "^13.4.4",
     "next": "^16.3.6",
+    "nodemailer": "^10.0.12",
+    "postgres": "^3.4.9",
     "radix-ui": "^1.6.7",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -28,6 +33,7 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.20.4",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^9.39.5",

@@ -38,7 +38,7 @@ export default async function EnterprisePage({ params }: PageProps<"/[locale]/en
             </a>
           </Button>
           <Button asChild size="lg" variant="ghost">
-            <Link href={href(locale, "/docs")}>{t.ctaSecondary}</Link>
+            <Link href={href(locale, "/pricing")}>{t.ctaSecondary}</Link>
           </Button>
         </div>
       </PageHero>
@@ -84,16 +84,7 @@ export default async function EnterprisePage({ params }: PageProps<"/[locale]/en
               <Receipt className="size-7 text-violet-fg" aria-hidden />
               <h2 className="mt-5 text-2xl font-semibold tracking-tight">{t.billing.title}</h2>
               <p className="mt-2 text-muted">{t.billing.body}</p>
-              <div dir="ltr" className="mt-8 grid grid-cols-3 gap-3 font-mono text-xs">
-                {["2026", "2027", "2028"].map((y) => (
-                  <div key={y} className="rounded-xl border border-border bg-bg-elevated p-4">
-                    <p className="text-muted">{y}</p>
-                    <p dir={locale === "ar" ? "rtl" : "ltr"} className="mt-2 text-sm font-semibold text-fg">
-                      {t.billing.locked}
-                    </p>
-                  </div>
-                ))}
-              </div>
+              <p className="mt-8 inline-flex rounded-xl border border-border bg-bg-elevated px-4 py-3 text-sm font-semibold text-fg">{t.billing.locked}</p>
             </div>
           </Reveal>
         </div>
@@ -109,7 +100,7 @@ export default async function EnterprisePage({ params }: PageProps<"/[locale]/en
               <p className="mt-3 text-muted">{t.form.sub}</p>
             </div>
             <div className="lg:col-span-8">
-              <ContactForm t={t.form} errorsT={dict.checkout.errors} />
+              <ContactForm t={t.form} errorsT={dict.checkout.errors} locale={locale} />
             </div>
           </div>
         </div>

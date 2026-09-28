@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { Mail } from "lucide-react";
 import type { Dictionary } from "@/i18n/dictionaries/en";
 import type { Locale } from "@/i18n/config";
-import { productSlugs, products } from "@/lib/catalog";
 import { href } from "@/lib/links";
 import { contact, social } from "@/lib/site";
 import { fill } from "@/lib/utils";
@@ -9,29 +9,30 @@ import { Logo } from "@/components/brand/logo";
 import { GitHubIcon, LinkedInIcon, YouTubeIcon } from "@/components/brand/social-icons";
 import { NewsletterForm } from "@/components/forms/newsletter-form";
 
-export function Footer({ locale, dict }: { locale: Locale; dict: Dictionary }) {
+export function Footer({ locale, dict, products }: { locale: Locale; dict: Dictionary; products: { slug: string; name: string }[] }) {
   const t = dict.footer;
   const columns = [
     {
       title: t.columns.products,
-      links: productSlugs.map((s) => ({ label: products[s].name, href: href(locale, `/products/${s}`), ltr: true })),
+      links: products.length
+        ? products.slice(0, 8).map((p) => ({ label: p.name, href: href(locale, `/products/${p.slug}`), ltr: true }))
+        : [{ label: t.noProducts, href: href(locale, "/#products") }],
     },
     {
       title: t.columns.company,
       links: [
-        { label: t.company.enterprise, href: href(locale, "/enterprise") },
-        { label: t.company.contact, href: href(locale, "/enterprise#contact") },
-        { label: t.company.students, href: href(locale, "/pricing#student") },
-        { label: t.company.support, href: `mailto:${contact.support}` },
+        { label: t.company.teams, href: href(locale, "/enterprise") },
+        { label: t.company.contact, href: href(locale, "/contact") },
+        { label: contact.email, href: `mailto:${contact.email}`, ltr: true },
       ],
     },
     {
       title: t.columns.resources,
       links: [
-        { label: t.resources.docs, href: href(locale, "/docs") },
-        { label: t.resources.changelog, href: href(locale, "/changelog") },
+        { label: t.resources.download, href: href(locale, "/download") },
         { label: t.resources.trial, href: href(locale, "/trial") },
         { label: t.resources.pricing, href: href(locale, "/pricing") },
+        { label: t.resources.docs, href: href(locale, "/docs") },
       ],
     },
     {
@@ -49,7 +50,7 @@ export function Footer({ locale, dict }: { locale: Locale; dict: Dictionary }) {
     { label: "LinkedIn", href: social.linkedin, Icon: LinkedInIcon },
     { label: "YouTube", href: social.youtube, Icon: YouTubeIcon },
     { label: "GitHub", href: social.github, Icon: GitHubIcon },
-  ];
+  ].filter((s) => s.href);
 
   return (
     <footer className="relative mt-16 border-t border-border bg-bg-elevated/40">
@@ -73,7 +74,7 @@ export function Footer({ locale, dict }: { locale: Locale; dict: Dictionary }) {
               <ul className="mt-4 grid gap-2.5">
                 {col.links.map((l) => (
                   <li key={l.href}>
-                    <Link href={l.href} className="text-sm text-fg-soft transition-colors hover:text-accent-fg">
+                    <Link href={l.href} className="text-sm text-fg-soft transition-colors [overflow-wrap:anywhere] hover:text-accent-fg">
                       <span className={"ltr" in l && l.ltr ? "ltr" : undefined}>{l.label}</span>
                     </Link>
                   </li>
@@ -90,8 +91,21 @@ export function Footer({ locale, dict }: { locale: Locale; dict: Dictionary }) {
             <span className="text-fg-soft">{dict.common.promise}</span>
           </p>
           <div className="flex items-center gap-4">
+            <Link href="/admin" prefetch={false} className="hover:text-fg">
+              {t.admin}
+            </Link>
             <span className="font-mono">{t.madeIn}</span>
             <ul className="flex items-center gap-1">
+              <li>
+                <a
+                  href={`mailto:${contact.email}`}
+                  aria-label={contact.email}
+                  title={contact.email}
+                  className="inline-flex size-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-fg"
+                >
+                  <Mail className="size-4" aria-hidden />
+                </a>
+              </li>
               {socials.map(({ label, href: url, Icon }) => (
                 <li key={label}>
                   <a

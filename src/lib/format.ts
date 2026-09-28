@@ -25,7 +25,7 @@ export function formatEGP(value: number, locale: Locale, withDecimals = false) {
   return `${currencyLabel[locale]} ${formatAmount(value, withDecimals)}`;
 }
 
-export function formatDate(iso: string, locale: Locale) {
+export function formatDate(iso: string | Date, locale: Locale) {
   return new Intl.DateTimeFormat(locale === "ar" ? "ar-EG-u-nu-latn" : "en-GB", {
     year: "numeric",
     month: "short",

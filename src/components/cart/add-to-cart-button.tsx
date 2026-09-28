@@ -2,28 +2,26 @@
 
 import * as React from "react";
 import { Check, ShoppingBag } from "lucide-react";
-import type { BillingCycle, PluginSlug, PurchasablePlanId } from "@/lib/catalog";
+import type { Billing } from "@/lib/catalog-types";
 import { cartStore } from "@/lib/cart-store";
 import { Button } from "@/components/ui/button";
 import { useUI } from "@/components/providers/site-providers";
 
 export function AddToCartButton({
-  plan,
-  billing = "yearly",
-  plugin,
+  productId,
+  billing,
   label,
   addedLabel,
   variant = "primary",
   size = "lg",
   className,
 }: {
-  plan: PurchasablePlanId;
-  billing?: BillingCycle;
-  plugin?: PluginSlug;
+  productId: string;
+  billing: Billing;
   label: string;
   addedLabel: string;
   variant?: "primary" | "secondary";
-  size?: "md" | "lg";
+  size?: "sm" | "md" | "lg";
   className?: string;
 }) {
   const { setCartOpen } = useUI();
@@ -34,7 +32,7 @@ export function AddToCartButton({
       size={size}
       className={className}
       onClick={() => {
-        cartStore.add({ plan, billing, plugin });
+        cartStore.add(productId, billing);
         setAdded(true);
         setCartOpen(true);
         window.setTimeout(() => setAdded(false), 1800);

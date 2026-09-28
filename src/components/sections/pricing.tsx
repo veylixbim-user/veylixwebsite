@@ -4,28 +4,29 @@ import * as React from "react";
 import Link from "next/link";
 import { AnimatePresence } from "motion/react";
 import * as m from "motion/react-m";
-import { ArrowRight, Check, GraduationCap, Lock, Receipt, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Check, Clock, Receipt, Sparkles, Users } from "lucide-react";
 import type { Dictionary } from "@/i18n/dictionaries/en";
 import type { Locale } from "@/i18n/config";
-import { EGP_PER_EUR, pluginSlugs, plans, products, type BillingCycle, type PluginSlug, type PurchasablePlanId } from "@/lib/catalog";
-import { cartStore } from "@/lib/cart-store";
+import type { Billing } from "@/lib/catalog-types";
+import { EGP_PER_EUR } from "@/lib/constants";
 import { currencyLabel, formatAmount } from "@/lib/format";
 import { href } from "@/lib/links";
+import { priceOf } from "@/lib/pricing";
 import { cn, fill } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select } from "@/components/ui/input";
 import { SectionHeader } from "@/components/ui/section";
 import { useUI } from "@/components/providers/site-providers";
-import { ProductIcon } from "@/components/brand/product-icon";
+import { ProductThumb } from "@/components/brand/product-thumb";
+import { AddToCartButton } from "@/components/cart/add-to-cart-button";
 
-export const PAYMENT_METHODS = ["Paymob", "Fawry", "Vodafone Cash", "InstaPay", "Visa", "Mastercard", "Meeza"];
+const OTHER_METHODS = ["card", "fawry", "wallet", "meeza"] as const;
 
 type Props = {
   locale: Locale;
   t: Dictionary["pricing"];
   common: Dictionary["common"];
-  pluginNames: Record<PluginSlug, string>;
+  methods: Dictionary["checkout"]["methods"];
   headingLevel?: "h1" | "h2";
 };
 
@@ -44,7 +45,7 @@ function useOutsideEgypt() {
   );
 }
 
-function BillingToggle({ billing, setBilling, t, common }: { billing: BillingCycle; setBilling: (b: BillingCycle) => void; t: Props["t"]; common: Props["common"] }) {
+function BillingToggle({ billing, setBilling, t, common }: { billing: Billing; setBilling: (b: Billing) => void; t: Props["t"]; common: Props["common"] }) {
   return (
     <div role="radiogroup" aria-label={t.toggleLabel} className="relative grid grid-cols-2 rounded-full border border-border-strong bg-surface p-1 text-sm">
       <span
@@ -61,10 +62,7 @@ function BillingToggle({ billing, setBilling, t, common }: { billing: BillingCyc
           role="radio"
           aria-checked={billing === b}
           onClick={() => setBilling(b)}
-          className={cn(
-            "relative z-10 inline-flex h-9 items-center justify-center gap-2 rounded-full px-5 font-medium transition-colors",
-            billing === b ? "text-fg" : "text-muted hover:text-fg",
-          )}
+          className={cn("relative z-10 inline-flex h-9 items-center justify-center gap-2 rounded-full px-5 font-medium transition-colors", billing === b ? "text-fg" : "text-muted hover:text-fg")}
         >
           {b === "monthly" ? common.monthly : common.yearly}
           {b === "yearly" ? <span className="rounded-full bg-[color-mix(in_oklab,var(--success)_16%,transparent)] px-2 py-0.5 text-[11px] font-semibold text-success">{t.save}</span> : null}
@@ -82,9 +80,9 @@ function Price({ amount, locale, period }: { amount: number; locale: Locale; per
         <AnimatePresence mode="popLayout" initial={false}>
           <m.span
             key={amount}
-            initial={{ y: 18, opacity: 0, filter: "blur(4px)" }}
-            animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
-            exit={{ y: -18, opacity: 0, filter: "blur(4px)" }}
+            initial={{ y: 18, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -18, opacity: 0 }}
             transition={{ duration: 0.35, ease: [0.2, 0.7, 0.2, 1] }}
             className="ltr text-[40px] font-semibold leading-none tracking-[-0.04em] text-fg tabular-nums"
           >
@@ -97,23 +95,13 @@ function Price({ amount, locale, period }: { amount: number; locale: Locale; per
   );
 }
 
-export function PricingSection({ locale, t, common, pluginNames, headingLevel = "h2" }: Props) {
-  const { setCartOpen } = useUI();
-  const [billing, setBilling] = React.useState<BillingCycle>("yearly");
-  const [plugin, setPlugin] = React.useState<PluginSlug>("circuit");
-  const [added, setAdded] = React.useState<string | null>(null);
+export function PricingSection({ locale, t, common, methods, headingLevel = "h2" }: Props) {
+  const { products, shop } = useUI();
+  const hasYearly = products.some((p) => p.priceYearly != null);
+  const [billing, setBilling] = React.useState<Billing>("monthly");
   const outside = useOutsideEgypt();
-
-  function add(plan: PurchasablePlanId) {
-    cartStore.add({ plan, billing, plugin: plan === "starter" ? plugin : undefined });
-    setAdded(plan);
-    window.setTimeout(() => setAdded((a) => (a === plan ? null : a)), 1800);
-    setCartOpen(true);
-  }
-
-  const period = billing === "monthly" ? common.perMonth : common.perYear;
   const PlanHeading = headingLevel === "h1" ? "h2" : "h3";
-  const tiers = ["starter", "pro", "studio", "enterprise"] as const;
+  const tagline = (p: (typeof products)[number]) => (locale === "ar" ? p.taglineAr || p.taglineEn : p.taglineEn || p.taglineAr);
 
   return (
     <section id="pricing" aria-labelledby="pricing-title" className="relative cv-auto py-20 sm:py-28">
@@ -131,187 +119,131 @@ export function PricingSection({ locale, t, common, pluginNames, headingLevel = 
           <SectionHeader id="pricing-title" eyebrow={t.eyebrow} title={t.title} sub={t.sub} />
         )}
 
-        <div className="mt-10 flex justify-center">
-          <BillingToggle billing={billing} setBilling={setBilling} t={t} common={common} />
-        </div>
+        {products.length === 0 ? (
+          <div className="mx-auto mt-12 max-w-lg rounded-2xl border border-dashed border-border-strong p-8 text-center">
+            <Clock className="mx-auto size-6 text-accent-fg" aria-hidden />
+            <p className="mt-3 font-semibold">{t.emptyTitle}</p>
+            <p className="mt-1 text-sm text-muted">{t.emptyBody}</p>
+          </div>
+        ) : (
+          <>
+            {hasYearly ? (
+              <div className="mt-10 flex justify-center">
+                <BillingToggle billing={billing} setBilling={setBilling} t={t} common={common} />
+              </div>
+            ) : null}
 
-        <div className="mt-12 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {tiers.map((id) => {
-            const plan = plans[id];
-            const copy = t.plans[id];
-            const featured = !!plan.highlighted;
-            const price = plan.price?.[billing];
-            return (
-              <article
-                key={id}
-                className={cn(
-                  "relative flex flex-col rounded-2xl border p-6 transition-colors",
-                  featured
-                    ? "gradient-border border-transparent bg-[linear-gradient(180deg,color-mix(in_oklab,var(--accent)_8%,var(--surface)),var(--surface)_45%)] shadow-[0_30px_80px_-30px_var(--glow)]"
-                    : "border-border bg-surface hover:border-border-strong",
-                )}
-                aria-labelledby={`plan-${id}`}
-              >
-                <div className="flex items-center justify-between">
-                  <PlanHeading id={`plan-${id}`} className="ltr text-lg font-semibold text-fg">
-                    {copy.name}
-                  </PlanHeading>
-                  {featured ? (
-                    <Badge variant="accent" size="sm">
-                      <Sparkles className="size-3" aria-hidden />
-                      {t.mostPopular}
-                    </Badge>
-                  ) : null}
-                </div>
-                <p className="mt-2 min-h-[2.75rem] text-sm leading-relaxed text-muted">{copy.description}</p>
-
-                <div className="mt-6 min-h-[92px]">
-                  {price !== undefined ? (
-                    <>
-                      <Price amount={price} locale={locale} period={period} />
-                      <p className="mt-2 text-xs text-muted">
-                        {billing === "yearly" ? (
-                          <span className="inline-flex items-center gap-1 text-success">
-                            <Lock className="size-3" aria-hidden />
-                            {t.lockedRate}
-                          </span>
-                        ) : (
-                          t.billedMonthly
+            <div className={cn("mx-auto mt-12 grid gap-4 md:grid-cols-2", products.length >= 3 ? "xl:grid-cols-3" : "max-w-4xl")}>
+              {products.map((p) => {
+                const price = priceOf(p, billing) ?? (billing === "yearly" ? null : priceOf(p, "yearly"));
+                const effectiveBilling: Billing = priceOf(p, billing) != null ? billing : billing === "yearly" ? "monthly" : "yearly";
+                const featured = false;
+                return (
+                  <article
+                    key={p.id}
+                    aria-labelledby={`plan-${p.id}`}
+                    className={cn(
+                      "relative flex flex-col rounded-2xl border p-6 transition-colors",
+                      featured
+                        ? "gradient-border border-transparent bg-[linear-gradient(180deg,color-mix(in_oklab,var(--accent)_8%,var(--surface)),var(--surface)_45%)] shadow-[0_30px_80px_-30px_var(--glow)]"
+                        : "border-border bg-surface hover:border-border-strong",
+                    )}
+                  >
+                    <div className="flex items-center gap-3">
+                      <ProductThumb image={p.image} art={p.art} name={p.name} className="size-12" />
+                      <div className="min-w-0">
+                        <PlanHeading id={`plan-${p.id}`} className="ltr truncate text-lg font-semibold text-fg">
+                          <Link href={href(locale, `/products/${p.slug}`)} className="hover:underline">
+                            {p.name}
+                          </Link>
+                        </PlanHeading>
+                        {p.hasFile ? null : (
+                          <Badge size="sm" className="mt-1">
+                            {common.comingSoon}
+                          </Badge>
                         )}
-                      </p>
-                      {outside ? (
-                        <p className="mt-1 font-mono text-[11px] text-muted">
-                          {fill(common.approx, { amount: `€${formatAmount(price / EGP_PER_EUR)}` })}
-                        </p>
-                      ) : null}
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-[40px] font-semibold leading-none tracking-[-0.04em] text-fg">{t.custom}</p>
-                      <p className="mt-2 text-xs text-muted">{t.customNote}</p>
-                    </>
-                  )}
-                </div>
+                      </div>
+                    </div>
+                    {tagline(p) ? <p className="mt-3 min-h-[2.75rem] text-sm leading-relaxed text-muted">{tagline(p)}</p> : null}
 
-                <div className="mt-4 min-h-[66px]">
-                  {id === "starter" ? (
-                    <>
-                      <label htmlFor="starter-plugin" className="mb-1.5 block text-xs font-medium text-muted">
-                        {t.choosePlugin}
-                      </label>
-                      <Select id="starter-plugin" value={plugin} onChange={(e) => setPlugin(e.target.value as PluginSlug)} className="h-10">
-                        {pluginSlugs.map((s) => (
-                          <option key={s} value={s}>
-                            {pluginNames[s]}
-                          </option>
-                        ))}
-                      </Select>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mb-1.5 text-xs font-medium text-muted">{t.includes}</p>
-                      <ul className="flex gap-1.5">
-                        {pluginSlugs.map((s) => (
-                          <li key={s} title={pluginNames[s]}>
-                            <ProductIcon slug={s} accent={products[s].accent} size="sm" className="size-10 rounded-lg" />
-                            <span className="sr-only">{pluginNames[s]}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </div>
-
-                <div className="mt-5 grid gap-2">
-                  {id === "enterprise" ? (
-                    <Button asChild variant="secondary">
-                      <Link href={href(locale, "/enterprise#contact")}>
-                        {t.contactSales}
-                        <ArrowRight className="rtl:-scale-x-100" aria-hidden />
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button variant={featured ? "primary" : "secondary"} onClick={() => add(id)} aria-live="polite">
-                      {added === id ? (
+                    <div className="mt-6 min-h-[76px]">
+                      {price != null ? (
                         <>
-                          <Check aria-hidden /> {t.added}
+                          <Price amount={price} locale={locale} period={effectiveBilling === "monthly" ? common.perMonth : common.perYear} />
+                          {outside ? <p className="mt-2 font-mono text-[11px] text-muted">{fill(common.approx, { amount: `€${formatAmount(price / EGP_PER_EUR)}` })}</p> : null}
                         </>
                       ) : (
-                        t.addToCart
+                        <p className="text-2xl font-semibold text-fg">{t.noPrice}</p>
                       )}
-                    </Button>
-                  )}
-                  {id !== "enterprise" ? (
-                    <Link href={href(locale, "/trial")} className="py-1 text-center text-xs font-medium text-muted hover:text-fg">
-                      {t.startTrial}
-                    </Link>
-                  ) : null}
-                </div>
+                    </div>
 
-                <ul className="mt-6 grid gap-2.5 border-t border-border pt-6">
-                  {copy.features.map((f) => (
-                    <li key={f} className="flex gap-2.5 text-sm text-fg-soft">
-                      <Check className={cn("mt-0.5 size-4 shrink-0", featured ? "text-accent-fg" : "text-success")} aria-hidden />
-                      <span>{f}</span>
-                    </li>
-                  ))}
-                </ul>
-              </article>
-            );
-          })}
-        </div>
+                    <div className="mt-auto grid gap-2 pt-6">
+                      {price != null ? (
+                        <AddToCartButton productId={p.id} billing={effectiveBilling} label={t.addToCart} addedLabel={t.added} variant="primary" size="md" />
+                      ) : null}
+                      <div className="grid grid-cols-2 gap-2">
+                        {shop.trialsEnabled ? (
+                          <Button asChild variant="ghost" size="sm">
+                            <Link href={`${href(locale, "/trial")}?product=${p.slug}`}>{t.startTrial}</Link>
+                          </Button>
+                        ) : null}
+                        <Button asChild variant="ghost" size="sm" className={shop.trialsEnabled ? "" : "col-span-2"}>
+                          <Link href={`${href(locale, "/download")}?product=${p.slug}`}>{t.download}</Link>
+                        </Button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          </>
+        )}
 
-        {/* Student */}
-        <div id="student" className="mt-4 flex scroll-mt-28 flex-col gap-6 rounded-2xl border border-border bg-surface p-6 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mx-auto mt-4 flex max-w-5xl flex-col gap-4 rounded-2xl border border-border bg-surface p-6 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-4">
             <span className="inline-flex size-11 shrink-0 items-center justify-center rounded-xl border border-[color-mix(in_oklab,var(--violet)_40%,var(--border))] bg-[color-mix(in_oklab,var(--violet)_10%,var(--surface))] text-violet-fg">
-              <GraduationCap className="size-5" aria-hidden />
+              <Users className="size-5" aria-hidden />
             </span>
             <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <PlanHeading className="font-semibold text-fg">{t.student.title}</PlanHeading>
-                <Badge variant="violet" size="sm">
-                  {t.student.badge}
-                </Badge>
-              </div>
-              <p className="mt-1 max-w-xl text-sm text-muted">{t.student.body}</p>
+              <p className="font-semibold text-fg">{t.teams.title}</p>
+              <p className="mt-1 max-w-xl text-sm text-muted">{t.teams.body}</p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-5">
-            <p className="text-end">
-              <span className="text-xs text-muted">{currencyLabel[locale]} </span>
-              <span className="ltr text-2xl font-semibold tabular-nums">{formatAmount(plans.student.price![billing])}</span>
-              <span className="text-xs text-muted">{period}</span>
-            </p>
-            <Button variant="secondary" onClick={() => add("student")}>
-              {added === "student" ? <Check aria-hidden /> : null}
-              {added === "student" ? t.added : t.student.cta}
-            </Button>
-          </div>
+          <Button asChild variant="secondary">
+            <Link href={href(locale, "/enterprise#contact")}>
+              {t.teams.cta}
+              <ArrowRight className="rtl:-scale-x-100" aria-hidden />
+            </Link>
+          </Button>
         </div>
 
-        {/* Notes + payments */}
-        <div className="mt-10 grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div className="mx-auto mt-10 grid max-w-5xl gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
           <ul className="grid gap-2 text-sm text-muted">
             <li className="flex items-center gap-2">
               <Receipt className="size-4 shrink-0 text-accent-fg" aria-hidden />
-              {t.vatNote}
+              {shop.vatRate > 0 ? fill(t.vatNote, { vat: shop.vatRate }) : t.vatNone}
             </li>
             <li className="flex items-center gap-2">
               <Check className="size-4 shrink-0 text-success" aria-hidden />
-              {t.trialNote}
+              {t.keysNote}
             </li>
-            <li className="flex items-center gap-2">
-              <ShieldCheck className="size-4 shrink-0 text-violet-fg" aria-hidden />
-              {t.invoiceNote}
-            </li>
+            {shop.trialsEnabled ? (
+              <li className="flex items-center gap-2">
+                <Sparkles className="size-4 shrink-0 text-violet-fg" aria-hidden />
+                {fill(t.trialNote, { days: shop.trialDays })}
+              </li>
+            ) : null}
           </ul>
           <div>
             <p className="mb-2.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted lg:text-end">{t.payWith}</p>
-            <ul className="flex flex-wrap gap-2 lg:justify-end" aria-label={t.payWith}>
-              {PAYMENT_METHODS.map((p) => (
-                <li key={p} className="ltr rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-fg-soft">
-                  {p}
+            <ul className="flex flex-wrap gap-2 lg:justify-end">
+              <li className="ltr rounded-lg border border-[color-mix(in_oklab,var(--accent)_50%,transparent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-3 py-1.5 text-xs font-semibold text-accent-fg">
+                InstaPay
+              </li>
+              {OTHER_METHODS.map((mth) => (
+                <li key={mth} className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-muted">
+                  {methods[mth]}
+                  <span className="rounded bg-surface-3 px-1 py-px text-[9px] font-medium uppercase tracking-wide">{t.comingSoon}</span>
                 </li>
               ))}
             </ul>

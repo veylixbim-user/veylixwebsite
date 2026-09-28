@@ -3,8 +3,9 @@ import { contact } from "@/lib/site";
 import { SectionHeader } from "@/components/ui/section";
 import { FaqList } from "./faq";
 
-export function FaqSection({ dict }: { dict: Dictionary }) {
+export function FaqSection({ dict, activationDays }: { dict: Dictionary; activationDays: number }) {
   const t = dict.faq;
+  const items = t.items.map((i) => ({ q: i.q, a: i.a.replaceAll("{days}", String(activationDays)) }));
   const [before, after] = t.sub.split("{email}");
   return (
     <section id="faq" aria-labelledby="faq-title" className="relative cv-auto scroll-mt-20 py-20 sm:py-24">
@@ -27,7 +28,7 @@ export function FaqSection({ dict }: { dict: Dictionary }) {
           />
         </div>
         <div className="lg:col-span-8">
-          <FaqList items={t.items} />
+          <FaqList items={items} />
         </div>
       </div>
     </section>

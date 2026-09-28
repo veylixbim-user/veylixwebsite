@@ -6,9 +6,15 @@ import { LazyMotion, MotionConfig, domAnimation } from "motion/react";
 import { cartStore } from "@/lib/cart-store";
 import type { CartItem } from "@/lib/pricing";
 import type { Locale } from "@/i18n/config";
+import type { CatalogItem } from "@/lib/catalog-types";
+
+export type ShopSettings = { vatRate: number; trialsEnabled: boolean; trialDays: number; activationDays: number; instapayNumber: string; instapayName: string };
 
 type UIContextValue = {
   locale: Locale;
+  catalog: Map<string, CatalogItem>;
+  products: CatalogItem[];
+  shop: ShopSettings;
   cartOpen: boolean;
   setCartOpen: (open: boolean) => void;
   searchOpen: boolean;
@@ -17,7 +23,19 @@ type UIContextValue = {
 
 const UIContext = React.createContext<UIContextValue | null>(null);
 
-export function SiteProviders({ locale, dir, children }: { locale: Locale; dir: "ltr" | "rtl"; children: React.ReactNode }) {
+export function SiteProviders({
+  locale,
+  dir,
+  products,
+  shop,
+  children,
+}: {
+  locale: Locale;
+  dir: "ltr" | "rtl";
+  products: CatalogItem[];
+  shop: ShopSettings;
+  children: React.ReactNode;
+}) {
   const [cartOpen, setCartOpen] = React.useState(false);
   const [searchOpen, setSearchOpen] = React.useState(false);
 
@@ -32,7 +50,11 @@ export function SiteProviders({ locale, dir, children }: { locale: Locale; dir: 
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const value = React.useMemo(() => ({ locale, cartOpen, setCartOpen, searchOpen, setSearchOpen }), [locale, cartOpen, searchOpen]);
+  const catalog = React.useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  const value = React.useMemo(
+    () => ({ locale, catalog, products, shop, cartOpen, setCartOpen, searchOpen, setSearchOpen }),
+    [locale, catalog, products, shop, cartOpen, searchOpen],
+  );
 
   return (
     <Direction.Provider dir={dir}>

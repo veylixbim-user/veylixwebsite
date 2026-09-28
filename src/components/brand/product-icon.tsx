@@ -1,8 +1,8 @@
 import { Boxes, Lightbulb, PanelsTopLeft, Route, Tags, Zap, type LucideIcon } from "lucide-react";
-import type { ProductSlug } from "@/lib/catalog";
+import { ART, type ArtId } from "@/lib/art";
 import { cn } from "@/lib/utils";
 
-export const productIcons: Record<ProductSlug, LucideIcon> = {
+export const productIcons: Record<ArtId, LucideIcon> = {
   circuit: Zap,
   conduit: Route,
   panel: PanelsTopLeft,
@@ -18,17 +18,17 @@ const accentClass = {
 } as const;
 
 export function ProductIcon({
-  slug,
-  accent = "cyan",
+  art,
+  accent = ART[art].accent,
   className,
   size = "md",
 }: {
-  slug: ProductSlug;
+  art: ArtId;
   accent?: keyof typeof accentClass;
   className?: string;
   size?: "sm" | "md" | "lg";
 }) {
-  const Icon = productIcons[slug];
+  const Icon = productIcons[art];
   return (
     <span
       className={cn(
