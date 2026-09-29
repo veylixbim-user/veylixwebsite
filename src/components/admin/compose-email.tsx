@@ -1,9 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { useActionState } from "react";
 import { Dialog } from "radix-ui";
 import { ExternalLink, Loader2, Mail, Send, X } from "lucide-react";
+import { useKeepFormAction } from "@/components/admin/use-form-action";
 import { sendEmailAction, type EmailActionState } from "@/app/admin/actions";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/input";
@@ -22,7 +22,7 @@ type Props = {
 /** "Email customer" button + dialog. Sends from the VEYLIX Gmail inbox; offers Gmail compose as a fallback. */
 export function ComposeEmail({ to, name, subject = "", body, messageId, label = "Email", variant = "secondary", size = "sm" }: Props) {
   const [open, setOpen] = React.useState(false);
-  const [state, action, pending] = useActionState<EmailActionState, FormData>(sendEmailAction, undefined);
+  const [state, onSubmit, pending] = useKeepFormAction<EmailActionState>(sendEmailAction);
   const first = name?.trim().split(/\s+/)[0];
   const initialBody = body ?? `Hi${first ? ` ${first}` : ""},\n\n\n\n— VEYLIX`;
 
@@ -54,7 +54,7 @@ export function ComposeEmail({ to, name, subject = "", body, messageId, label = 
               </button>
             </Dialog.Close>
           </div>
-          <form action={action} className="mt-5 grid gap-4">
+          <form onSubmit={onSubmit} className="mt-5 grid gap-4">
             {messageId ? <input type="hidden" name="messageId" value={messageId} /> : null}
             <Field label="To" htmlFor={`to-${to}`}>
               <Input id={`to-${to}`} name="to" defaultValue={to} dir="ltr" required />

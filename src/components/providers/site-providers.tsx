@@ -8,7 +8,19 @@ import type { CartItem } from "@/lib/pricing";
 import type { Locale } from "@/i18n/config";
 import type { CatalogItem } from "@/lib/catalog-types";
 
-export type ShopSettings = { vatRate: number; trialsEnabled: boolean; trialDays: number; activationDays: number; instapayNumber: string; instapayName: string };
+export type ShopSettings = {
+  vatRate: number;
+  trialsEnabled: boolean;
+  trialDays: number;
+  activationDays: number;
+  instapayNumber: string;
+  instapayName: string;
+  /** Optional InstaPay payment link (https) and its QR code (inline SVG made on the server). */
+  instapayLink: string;
+  instapayQr: string;
+  /** Which payment methods the checkout offers right now. */
+  methods: import("@/lib/payment-methods").MethodAvailability;
+};
 
 type UIContextValue = {
   locale: Locale;

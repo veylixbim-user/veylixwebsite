@@ -19,7 +19,9 @@ Contact / support inbox: **veylixbim@gmail.com**. Customers write here, and ever
    | --- | --- |
    | `ADMIN_PASSWORD` | your admin password |
    | `GMAIL_APP_PASSWORD` | a Gmail **App Password** for veylixbim@gmail.com (see [Email](#email)) |
-   | `CRON_SECRET` | any long random text — protects the daily renewal-reminder emails |
+   | `CRON_SECRET` | any long random text — protects the daily renewal-reminder and payment-recheck jobs |
+   | `PAYMOB_SECRET_KEY`, `PAYMOB_PUBLIC_KEY`, `PAYMOB_HMAC_SECRET` | from Paymob → Settings → API Keys (turns on card / wallet / Fawry / InstaPay payments — see [Online payments](#online-payments-paymob)) |
+   | `PAYMOB_API_KEY` | optional — lets the site recover a payment whose confirmation was missed |
 4. **Deployments → Redeploy** so the new variables are picked up.
 5. Open `https://<your-site>/admin`, sign in, and add your first plugin.
 6. In **Admin → Settings → Two-step sign-in**, turn it on with an authenticator app and keep the recovery codes safe.
@@ -61,6 +63,18 @@ Until then nothing is lost: messages are saved in the Inbox, order keys show on 
 and the Email button offers to open the message in Gmail instead.
 
 ---
+
+## Online payments (Paymob)
+
+Customers can pay by **Visa / Mastercard / Meeza card, mobile wallet (Vodafone Cash…), InstaPay, Fawry / Aman / Masary, or installments (valU, Sympl, bank plans)** in EGP, and their key is issued and emailed **automatically** the moment Paymob confirms the payment. Card numbers are typed on Paymob's own page — never on this site. The manual "InstaPay transfer" (you check it) stays available as a fallback.
+
+Setup (test mode works before Paymob verifies your business):
+
+1. Create a merchant account at paymob.com. In the dashboard: **Settings → API Keys** → copy the *Secret key*, *Public key* and *HMAC secret*; **Settings → Payment Integrations** → copy the *ID* of each method you enabled.
+2. In Vercel add `PAYMOB_SECRET_KEY`, `PAYMOB_PUBLIC_KEY`, `PAYMOB_HMAC_SECRET` (and optionally `PAYMOB_API_KEY`), then redeploy.
+3. Open **Admin → Settings → Online payments**, paste the integration IDs, save, and press **Test the Paymob connection**. Make a test payment with Paymob's test card, then switch Paymob to Live and replace the keys/IDs with the live ones.
+
+Admin → **Orders → New payment link** creates a secure link for a customer (also for renewals); **Payments** lists every attempt. The site sends Paymob its own callback and return addresses with each payment, so nothing needs pasting into the Paymob dashboard. Security and edge cases (wrong amount, replays, lost callbacks, refunds) are described in `docs/SECURITY-AND-LICENSING.md` §9.
 
 ## How licensing works
 

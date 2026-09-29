@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ExternalLink, Inbox, KeyRound, LayoutDashboard, LogOut, Package, Palette, Receipt, Settings, Users } from "lucide-react";
+import { CreditCard, ExternalLink, Inbox, ShieldAlert, KeyRound, LayoutDashboard, LogOut, Package, Palette, Receipt, Settings, Users } from "lucide-react";
 import { requireAdmin } from "@/lib/server/auth";
 import { ensureSeedKeys } from "@/lib/server/license-keys";
 import { pendingOrderCount } from "@/lib/server/orders";
@@ -20,9 +20,11 @@ export default async function PanelLayout({ children }: { children: React.ReactN
     { href: "/admin/products", label: "Products", icon: <Package className="size-4" aria-hidden /> },
     { href: "/admin/keys", label: "License keys", icon: <KeyRound className="size-4" aria-hidden /> },
     { href: "/admin/orders", label: "Orders", icon: <Receipt className="size-4" aria-hidden />, badge: pending || undefined },
+    { href: "/admin/payments", label: "Payments", icon: <CreditCard className="size-4" aria-hidden /> },
     { href: "/admin/inbox", label: "Inbox", icon: <Inbox className="size-4" aria-hidden />, badge: unread || undefined },
     { href: "/admin/customers", label: "Customers", icon: <Users className="size-4" aria-hidden /> },
     { href: "/admin/library", label: "Design library", icon: <Palette className="size-4" aria-hidden /> },
+    { href: "/admin/security", label: "Security", icon: <ShieldAlert className="size-4" aria-hidden /> },
     { href: "/admin/settings", label: "Settings", icon: <Settings className="size-4" aria-hidden /> },
   ];
 

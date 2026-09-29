@@ -1,5 +1,5 @@
 import "server-only";
-import { query, transaction } from "./db";
+import { query, transaction, type Queryable } from "./db";
 import { accessToken, invoiceNumber, licenseKey, normalizeKey, orderId } from "./ids";
 import { getSettings } from "./settings";
 import { getProductById } from "./products";
@@ -34,9 +34,19 @@ export type Order = {
   licenseKeys: IssuedKey[];
   invoiceNumber: string | null;
   adminNote: string | null;
+  paidAt: string | null;
+  locale: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+/** "paymob" = online payment through Paymob, "instapay" = transfer checked by the admin. */
+export type PaymentMethod = "instapay" | "paymob";
+
+/** True for an online order the customer hasn't paid yet (nothing for the admin to check). */
+export function awaitingOnlinePayment(o: Pick<Order, "status" | "method" | "paymentRef">) {
+  return o.status === "pending" && o.method === "paymob" && !o.paymentRef;
+}
 
 type OrderRow = {
   id: string;
@@ -59,6 +69,8 @@ type OrderRow = {
   license_keys: IssuedKey[] | string;
   invoice_number: string | null;
   admin_note: string | null;
+  paid_at: Date | null;
+  locale: string | null;
   created_at: Date;
   updated_at: Date;
 };
@@ -83,6 +95,8 @@ function map(r: OrderRow): Order {
     licenseKeys: json(r.license_keys),
     invoiceNumber: r.invoice_number,
     adminNote: r.admin_note,
+    paidAt: r.paid_at ? new Date(r.paid_at).toISOString() : null,
+    locale: r.locale,
     createdAt: new Date(r.created_at).toISOString(),
     updatedAt: new Date(r.updated_at).toISOString(),
   };
@@ -117,8 +131,10 @@ export async function createOrder(input: {
   lines: CartLine[];
   customer: { name: string; email: string; phone: string };
   business: { company: string; taxId: string; address: string } | null;
+  method: PaymentMethod;
   paymentRef: string;
   renewKey: string | null;
+  locale?: string | null;
 }) {
   const priced = await priceCart(input.lines);
   if (priced.items.length === 0) return null;
@@ -126,8 +142,8 @@ export async function createOrder(input: {
   const token = accessToken();
   await query(
     `INSERT INTO orders (id, access_token, status, method, payment_ref, customer_name, customer_email, customer_phone, company, tax_id, address,
-       renew_key, items, subtotal_cents, vat_cents, total_cents, vat_rate)
-     VALUES ($1,$2,'pending','instapay',$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15)`,
+       renew_key, items, subtotal_cents, vat_cents, total_cents, vat_rate, locale)
+     VALUES ($1,$2,'pending',$16,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14,$15,$17)`,
     [
       id,
       token,
@@ -144,9 +160,36 @@ export async function createOrder(input: {
       priced.vatCents,
       priced.totalCents,
       priced.vatRate,
+      input.method,
+      input.locale === "ar" ? "ar" : "en",
     ],
   );
-  return { id, accessToken: token, items: priced.items, total: priced.totalCents / 100 };
+  return { id, accessToken: token, items: priced.items, total: priced.totalCents / 100, totalCents: priced.totalCents, subtotalCents: priced.subtotalCents, vatCents: priced.vatCents, vatRate: priced.vatRate };
+}
+
+/**
+ * The customer paid by InstaPay transfer after all (e.g. online payment failed): record their transfer
+ * reference so the order shows up for the admin to check. Only while the order is still unpaid.
+ */
+export async function setManualPayment(id: string, paymentRef: string) {
+  const rows = await query<{ id: string }>(
+    "UPDATE orders SET method = 'instapay', payment_ref = $2, updated_at = now() WHERE id = $1 AND status = 'pending' RETURNING id",
+    [id, paymentRef],
+  );
+  return rows.length > 0;
+}
+
+/** Normalised transfer reference, as used for the "one transfer pays one order" check. */
+export function normalizeRef(ref: string) {
+  return ref.toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+export async function paymentRefUsed(ref: string, exceptOrderId?: string) {
+  const rows = await query(
+    "SELECT 1 FROM orders WHERE status IN ('pending', 'paid') AND upper(regexp_replace(payment_ref, '[^A-Za-z0-9]', '', 'g')) = $1 AND id <> $2 LIMIT 1",
+    [normalizeRef(ref), exceptOrderId ?? ""],
+  );
+  return rows.length > 0;
 }
 
 export async function getOrder(id: string): Promise<Order | null> {
@@ -162,16 +205,26 @@ export async function getOrderForCustomer(id: string, token: string): Promise<Or
   return timingSafeEqual(Buffer.from(order.accessToken), Buffer.from(token)) ? order : null;
 }
 
-export async function listOrders(status: "pending" | "paid" | "rejected" | "all" = "all") {
+/** Orders that need nothing from the admin yet: online checkout started, not paid. */
+const AWAITING_ONLINE_SQL = "(status = 'pending' AND method = 'paymob' AND payment_ref = '')";
+
+export type OrderFilter = "pending" | "online" | "paid" | "rejected" | "all";
+
+export async function listOrders(status: OrderFilter = "all") {
   const rows =
     status === "all"
-      ? await query<OrderRow>("SELECT * FROM orders ORDER BY (status = 'pending') DESC, created_at DESC LIMIT 500")
-      : await query<OrderRow>("SELECT * FROM orders WHERE status = $1 ORDER BY created_at DESC LIMIT 500", [status]);
+      ? await query<OrderRow>(`SELECT * FROM orders ORDER BY (status = 'pending' AND NOT ${AWAITING_ONLINE_SQL}) DESC, created_at DESC LIMIT 500`)
+      : status === "pending"
+        ? await query<OrderRow>(`SELECT * FROM orders WHERE status = 'pending' AND NOT ${AWAITING_ONLINE_SQL} ORDER BY created_at DESC LIMIT 500`)
+        : status === "online"
+          ? await query<OrderRow>(`SELECT * FROM orders WHERE ${AWAITING_ONLINE_SQL} ORDER BY created_at DESC LIMIT 500`)
+          : await query<OrderRow>("SELECT * FROM orders WHERE status = $1 ORDER BY created_at DESC LIMIT 500", [status]);
   return rows.map(map);
 }
 
+/** Orders waiting for the admin to check an InstaPay transfer. */
 export async function pendingOrderCount() {
-  const rows = await query<{ n: number | string }>("SELECT count(*)::int AS n FROM orders WHERE status = 'pending'");
+  const rows = await query<{ n: number | string }>(`SELECT count(*)::int AS n FROM orders WHERE status = 'pending' AND NOT ${AWAITING_ONLINE_SQL}`);
   return Number(rows[0]?.n ?? 0);
 }
 
@@ -188,13 +241,25 @@ function addPeriod(from: Date, billing: Billing) {
 export async function approveOrder(id: string) {
   // Read settings before the transaction (the single-connection dev database would deadlock inside it).
   const { renewalGraceDays } = await getSettings();
-  const graceMs = renewalGraceDays * 86_400_000;
-  return transaction(async (tx) => {
-    const rows = await tx.query<OrderRow>("SELECT * FROM orders WHERE id = $1 FOR UPDATE", [id]);
-    if (!rows[0]) return null;
-    const order = map(rows[0]);
-    if (order.status === "paid") return order;
+  return transaction((tx) => approveOrderTx(tx, id, { graceMs: renewalGraceDays * 86_400_000 }));
+}
 
+/**
+ * approveOrder inside an existing transaction (used by the payment callback, so recording the payment and issuing
+ * the keys commit together or not at all). Idempotent: an order that is already paid is returned unchanged,
+ * with `alreadyPaid: true`.
+ */
+export async function approveOrderTx(
+  tx: Queryable,
+  id: string,
+  opts: { graceMs: number; paidAt?: Date; paymentRef?: string },
+): Promise<(Order & { alreadyPaid: boolean }) | null> {
+  const rows = await tx.query<OrderRow>("SELECT * FROM orders WHERE id = $1 FOR UPDATE", [id]);
+  if (!rows[0]) return null;
+  const order = map(rows[0]);
+  if (order.status === "paid") return { ...order, alreadyPaid: true };
+  const graceMs = opts.graceMs;
+  {
     const now = new Date();
     const issued: IssuedKey[] = [];
     let renewUsed = false;
@@ -211,8 +276,9 @@ export async function approveOrder(id: string) {
           const k = existing[0];
           if (k && !k.revoked && (k.product_id === null || k.product_id === item.productId)) {
             // Paid on time (before the end date + grace)? Extend from the old end date, so a month is always a
-            // month. Paid after the license lapsed? The new month starts on the day of payment.
-            const paidAt = new Date(order.createdAt).getTime();
+            // month. Paid after the license lapsed? The new month starts on the day of payment. (For a transfer
+            // that is when the customer placed the order; online payments carry the exact payment time.)
+            const paidAt = (opts.paidAt ?? new Date(order.createdAt)).getTime();
             const end = k.expires_at ? new Date(k.expires_at).getTime() : null;
             const base = new Date(end !== null && paidAt <= end + graceMs ? end : paidAt);
             const newExpiry = addPeriod(base, item.billing);
@@ -247,9 +313,14 @@ export async function approveOrder(id: string) {
     }
 
     const invoice = order.invoiceNumber ?? invoiceNumber();
-    await tx.query("UPDATE orders SET status = 'paid', license_keys = $2::jsonb, invoice_number = $3, updated_at = now() WHERE id = $1", [id, JSON.stringify(issued), invoice]);
-    return { ...order, status: "paid" as const, licenseKeys: issued, invoiceNumber: invoice };
-  });
+    const paidAt = opts.paidAt ?? now;
+    const paymentRef = opts.paymentRef ?? order.paymentRef;
+    await tx.query(
+      "UPDATE orders SET status = 'paid', license_keys = $2::jsonb, invoice_number = $3, paid_at = $4, payment_ref = $5, updated_at = now() WHERE id = $1",
+      [id, JSON.stringify(issued), invoice, paidAt, paymentRef],
+    );
+    return { ...order, status: "paid" as const, licenseKeys: issued, invoiceNumber: invoice, paidAt: paidAt.toISOString(), paymentRef, alreadyPaid: false };
+  }
 }
 
 export async function rejectOrder(id: string, note: string | null) {

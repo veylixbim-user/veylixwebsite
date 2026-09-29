@@ -15,13 +15,18 @@ import {
   type ProductInput,
 } from "@/lib/server/products";
 import { generateKeys, logActivity, updateKey, type KeyUpdate } from "@/lib/server/license-keys";
-import { approveOrder, getOrder, rejectOrder } from "@/lib/server/orders";
-import { setSetting } from "@/lib/server/settings";
+import { approveOrder, createOrder, getOrder, rejectOrder } from "@/lib/server/orders";
+import { getKey } from "@/lib/server/license-keys";
+import { getSettings, setSetting } from "@/lib/server/settings";
 import { sendEmail } from "@/lib/server/http";
+import { sendOrderPaidEmail } from "@/lib/server/order-mail";
+import { createIntention, paymobEnv, parseIntegrationIds } from "@/lib/server/paymob";
+import { recheckOrderPayments } from "@/lib/server/payments";
+import { EG_MOBILE_RE, EMAIL_RE, normalizePhone } from "@/lib/validation";
 import { isArtId, type ArtId } from "@/lib/art";
 import { siteUrl } from "@/lib/site";
 
-export type ActionState = { ok?: boolean; error?: string; message?: string; keys?: string[]; needCode?: boolean } | undefined;
+export type ActionState = { ok?: boolean; error?: string; message?: string; keys?: string[]; needCode?: boolean; link?: string } | undefined;
 
 const str = (fd: FormData, k: string, max = 5000) => String(fd.get(k) ?? "").trim().slice(0, max);
 const intOrNull = (v: string) => {
@@ -219,20 +224,59 @@ export async function keyAction(_: ActionState, fd: FormData): Promise<ActionSta
 export async function approveOrderAction(fd: FormData) {
   await assertAdmin();
   const order = await approveOrder(str(fd, "id", 40));
-  if (order?.status === "paid") {
-    const keys = order.licenseKeys
-      .map((k) => `${k.productName}: ${k.key}${k.renewed ? " (renewed)" : ""} ${k.expiresAt ? ` — valid until ${k.expiresAt.slice(0, 10)}` : ""}`)
-      .join("\n");
-    const link = `${siteUrl}/en/order/${order.id}?t=${order.accessToken}`;
+  if (order?.status === "paid") await sendOrderPaidEmail(order, order.method === "paymob" ? "online" : "transfer").catch(() => undefined);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin");
+}
+
+/** Asks Paymob whether a customer's open online payment went through (when its callback never arrived). */
+export async function recheckPaymentAction(fd: FormData) {
+  await assertAdmin();
+  await recheckOrderPayments(str(fd, "id", 40), true).catch(() => undefined);
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/payments");
+}
+
+/**
+ * "New payment link": the owner enters a sale (customer, plugin, period) and gets a link the customer opens to pay by
+ * card, wallet, Fawry or InstaPay. Keys are issued automatically when the payment is confirmed. Also renews a license.
+ */
+export async function createPaymentLinkAction(_: ActionState, fd: FormData): Promise<ActionState> {
+  await assertAdmin();
+  const name = str(fd, "name", 120);
+  const email = str(fd, "email", 160).toLowerCase();
+  const phone = normalizePhone(str(fd, "phone", 30));
+  const productId = str(fd, "productId", 40);
+  const billing = str(fd, "billing", 10) === "yearly" ? "yearly" : "monthly";
+  const quantity = Math.min(50, Math.max(1, Math.floor(Number(str(fd, "quantity", 3))) || 1));
+  const renewKey = str(fd, "renewKey", 40) || null;
+  const language = str(fd, "locale", 2) === "ar" ? "ar" : "en";
+  if (name.length < 2) return { error: "Enter the customer's name." };
+  if (!EMAIL_RE.test(email)) return { error: "Enter a valid email address." };
+  if (!EG_MOBILE_RE.test(phone)) return { error: "Enter a valid Egyptian mobile number (needed by the payment page)." };
+  if (!productId) return { error: "Choose a plugin." };
+  if (renewKey) {
+    const key = await getKey(renewKey);
+    if (!key || key.revoked) return { error: "That key was not found (or is revoked)." };
+    if (!key.expiresAt) return { error: "That key never expires, so it doesn't need renewing." };
+    if (quantity !== 1) return { error: "Renew one license at a time." };
+    if (key.productId && key.productId !== productId) return { error: "That key belongs to a different plugin." };
+  }
+  const order = await createOrder({ lines: [{ productId, billing, quantity }], customer: { name, email, phone }, business: null, method: "paymob", paymentRef: "", renewKey, locale: language });
+  if (!order) return { error: "That plugin has no price for the chosen period. Set a price in Products first." };
+  const link = `${siteUrl}/${language}/order/${order.id}?t=${order.accessToken}`;
+  if (fd.get("notify") === "on") {
+    const total = order.total.toLocaleString("en-US", { minimumFractionDigits: 2 });
     await sendEmail(
-      order.customer.email,
-      `Your VEYLIX license — ${order.id}`,
-      `Hi ${order.customer.name},\n\nWe received your InstaPay payment — thank you! Your product keys:\n\n${keys}\n\nHow to start:\n1. Download the plugin: ${siteUrl}/en/download (enter your key)\n2. Install it and open Revit.\n3. Enter the same key when the plugin asks — it is locked to that PC.\n\nOrder & invoice: ${link}\n\nQuestions? Just reply to this email.\n\n— VEYLIX`,
+      email,
+      `Your VEYLIX payment link — ${order.id} / رابط الدفع الخاص بك`,
+      `Hi ${name},\n\nHere is your secure payment link for EGP ${total}:\n${link}\n\nYou can pay by card (Visa / Mastercard / Meeza), mobile wallet, Fawry or InstaPay. Your product key is emailed automatically as soon as the payment is confirmed.\n\n—\n\nمرحبًا ${name}،\n\nهذا رابط الدفع الآمن الخاص بك بمبلغ ${total} جنيه:\n${link}\n\nيمكنك الدفع بالبطاقة (فيزا / ماستركارد / ميزة) أو المحفظة الإلكترونية أو فوري أو إنستاباي. سيصلك مفتاح المنتج تلقائيًا بمجرد تأكيد الدفع.\n\n— VEYLIX`,
       "order",
     ).catch(() => undefined);
   }
+  await logActivity("payment-link", { detail: `${order.id} for ${email}` });
   revalidatePath("/admin/orders");
-  revalidatePath("/admin");
+  return { ok: true, link, message: `Payment link created for ${name} — EGP ${order.total.toLocaleString("en-US", { minimumFractionDigits: 2 })}.` };
 }
 
 export async function rejectOrderAction(fd: FormData) {
@@ -242,10 +286,13 @@ export async function rejectOrderAction(fd: FormData) {
   await rejectOrder(id, note);
   const order = await getOrder(id);
   if (order?.status === "rejected" && fd.get("notify") === "on") {
+    const online = order.method === "paymob";
     await sendEmail(
       order.customer.email,
       `About your VEYLIX order ${order.id}`,
-      `Hi ${order.customer.name},\n\nWe could not match your InstaPay transfer (reference ${order.paymentRef}) for order ${order.id}.${note ? `\n\nNote: ${note}` : ""}\n\nIf you already paid, reply to this email with a screenshot of the transfer and we will sort it out quickly.\n\n— VEYLIX`,
+      online
+        ? `Hi ${order.customer.name},\n\nYour VEYLIX order ${order.id} was cancelled.${note ? `\n\nNote: ${note}` : ""}\n\nIf you were charged, reply to this email and we will refund you quickly.\n\n— VEYLIX`
+        : `Hi ${order.customer.name},\n\nWe could not match your InstaPay transfer (reference ${order.paymentRef}) for order ${order.id}.${note ? `\n\nNote: ${note}` : ""}\n\nIf you already paid, reply to this email with a screenshot of the transfer and we will sort it out quickly.\n\n— VEYLIX`,
       "order",
     ).catch(() => undefined);
   }
@@ -262,6 +309,26 @@ export async function saveSettingsAction(_: ActionState, fd: FormData): Promise<
   const grace = intOrNull(str(fd, "renewalGraceDays", 3));
   const vat = intOrNull(str(fd, "vatRate", 3));
   const instapay = str(fd, "instapayNumber", 40);
+  const instapayLink = str(fd, "instapayLink", 300);
+  if (instapayLink) {
+    try {
+      const u = new URL(instapayLink);
+      if (u.protocol !== "https:") throw new Error("not https");
+    } catch {
+      return { error: "The InstaPay payment link must be a full https:// address (for example https://ipn.eg/S/yourname/instapay/abc123)." };
+    }
+  }
+  const ids = (k: string) => {
+    const raw = str(fd, k, 120);
+    if (raw && parseIntegrationIds(raw).length === 0) return null;
+    return parseIntegrationIds(raw).join(", ");
+  };
+  const idCard = ids("paymobCard");
+  const idWallet = ids("paymobWallet");
+  const idInstapay = ids("paymobInstapay");
+  const idKiosk = ids("paymobKiosk");
+  const idInstallments = ids("paymobInstallments");
+  if ([idCard, idWallet, idInstapay, idKiosk, idInstallments].includes(null)) return { error: "Paymob integration IDs are numbers (for example 4569876). Separate several with commas." };
   if (!days || days < 1 || days > 3650) return { error: "License check interval must be between 1 and 3650 days." };
   if (!trialDays || trialDays < 1 || trialDays > 365) return { error: "Trial length must be between 1 and 365 days." };
   if (grace === null || grace > 30) return { error: "Renewal grace must be between 0 and 30 days." };
@@ -274,9 +341,42 @@ export async function saveSettingsAction(_: ActionState, fd: FormData): Promise<
   await setSetting("vat_rate", String(vat));
   await setSetting("instapay_number", instapay);
   await setSetting("instapay_name", str(fd, "instapayName", 80));
+  await setSetting("instapay_link", instapayLink);
+  await setSetting("manual_payments_enabled", fd.get("manualPaymentsEnabled") === "on" ? "1" : "0");
+  await setSetting("online_payments_enabled", fd.get("onlinePaymentsEnabled") === "on" ? "1" : "0");
+  await setSetting("paymob_card_id", idCard ?? "");
+  await setSetting("paymob_wallet_id", idWallet ?? "");
+  await setSetting("paymob_instapay_id", idInstapay ?? "");
+  await setSetting("paymob_kiosk_id", idKiosk ?? "");
+  await setSetting("paymob_installments_ids", idInstallments ?? "");
   refreshSite();
   revalidatePath("/admin/settings");
   return { ok: true, message: "Settings saved. Plugins pick up the new check interval at their next online check." };
+}
+
+/** Creates a real (unpaid) Paymob payment request for EGP 10 to prove the keys, region and integration IDs work. */
+export async function testPaymobAction(): Promise<ActionState> {
+  await assertAdmin();
+  const env = paymobEnv();
+  if (!env) return { error: "Paymob keys are not set. Add PAYMOB_SECRET_KEY, PAYMOB_PUBLIC_KEY and PAYMOB_HMAC_SECRET in your hosting environment variables, then redeploy." };
+  const settings = await getSettings();
+  const ids = parseIntegrationIds(settings.paymob.card, settings.paymob.wallet, settings.paymob.instapay, settings.paymob.kiosk, settings.paymob.installments);
+  if (ids.length === 0) return { error: "Save at least one Paymob integration ID first (for example the card one)." };
+  try {
+    const intention = await createIntention(env, {
+      amountCents: 1000,
+      specialReference: `TEST-${Date.now().toString(36).toUpperCase()}`,
+      integrationIds: ids.slice(0, 1),
+      items: [{ name: "VEYLIX connection test", amountCents: 1000, quantity: 1 }],
+      customer: { name: "VEYLIX Test", email: "veylixbim@gmail.com", phone: "01000000000" },
+      notificationUrl: `${siteUrl}/api/paymob/callback`,
+      redirectionUrl: `${siteUrl}/en`,
+      expiresInSeconds: 600,
+    });
+    return { ok: true, link: intention.checkoutUrl, message: `Paymob accepted the keys (${env.testMode ? "TEST mode" : "LIVE mode"}). Nothing was charged.` };
+  } catch (err) {
+    return { error: `Paymob refused the request: ${err instanceof Error ? err.message.slice(0, 300) : "unknown error"}` };
+  }
 }
 
 /* ----------------------------- email ---------------------------- */

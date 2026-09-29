@@ -12,9 +12,22 @@ const ANIMATION_CSS = `
 .art-lux{opacity:.25;animation:vx-lux 1.2s ease forwards}
 .draw{stroke-dasharray:1;stroke-dashoffset:1;animation:vx-redraw var(--dur,1.6s) cubic-bezier(.65,0,.35,1) var(--delay,0s) forwards}
 .appear{opacity:0;animation:vx-appear .5s ease var(--delay,0s) forwards}
+.flow-dash{stroke-dasharray:6 10;animation:vx-flow 1.2s linear infinite}
+.glow-on{opacity:0;animation:vx-appear .7s ease var(--delay,0s) forwards}
+.pulse-soft{animation:vx-pulse 2s ease-in-out var(--delay,0s) infinite}
+.spin{animation:vx-spin 2.4s linear infinite}
+.plug-slide{animation:vx-slide 5s cubic-bezier(.6,0,.3,1) infinite}
+.plug-check{transform-origin:280px 70px;animation:vx-check 5s ease infinite}
+.plug-spark{animation:vx-spark 5s ease infinite}
 @keyframes vx-redraw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
 @keyframes vx-lux{from{opacity:.25}to{opacity:1}}
 @keyframes vx-appear{to{opacity:1}}
+@keyframes vx-flow{to{stroke-dashoffset:-16}}
+@keyframes vx-pulse{50%{opacity:.35}}
+@keyframes vx-spin{to{transform:rotate(360deg)}}
+@keyframes vx-slide{0%{transform:translateX(90px);opacity:0}15%{opacity:1}45%,100%{transform:translateX(0);opacity:1}}
+@keyframes vx-check{0%,44%{transform:scale(0);opacity:0}52%{transform:scale(1.25);opacity:1}60%,92%{transform:scale(1);opacity:1}100%{transform:scale(1);opacity:0}}
+@keyframes vx-spark{0%,42%{opacity:0}46%{opacity:1}56%,100%{opacity:0}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;opacity:1!important;stroke-dashoffset:0!important}}`;
 
 function needsResolve(value: string | null) {
@@ -54,7 +67,7 @@ export function serializeSvg(svg: SVGSVGElement, opts: ExportOptions = {}): stri
     // Tailwind classes mean nothing outside the app; keep only the animation hooks.
     const cls = el.getAttribute("class");
     if (cls) {
-      const keep = cls.split(/\s+/).filter((c) => ["art-trace", "art-delay", "art-lux", "draw", "appear"].includes(c));
+      const keep = cls.split(/\s+/).filter((c) => ["art-trace", "art-delay", "art-lux", "draw", "appear", "flow-dash", "glow-on", "pulse-soft", "spin", "plug-slide", "plug-check", "plug-spark"].includes(c));
       if (keep.length) out.setAttribute("class", keep.join(" "));
       else out.removeAttribute("class");
     }
@@ -102,7 +115,7 @@ export function serializeSvg(svg: SVGSVGElement, opts: ExportOptions = {}): stri
     rect.setAttribute("fill", opts.background);
     clone.insertBefore(rect, clone.firstChild);
   }
-  if (opts.animated && clone.querySelector(".art-trace, .art-lux, .draw, .appear")) {
+  if (opts.animated && clone.querySelector(".art-trace, .art-lux, .draw, .appear, .flow-dash, .glow-on, .plug-slide")) {
     const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
     style.textContent = ANIMATION_CSS;
     clone.insertBefore(style, clone.firstChild);

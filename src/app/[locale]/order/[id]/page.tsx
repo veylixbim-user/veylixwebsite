@@ -1,11 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CheckCircle2, Clock, Download, KeyRound, XCircle } from "lucide-react";
+import { Check, CheckCircle2, Clock, Download, KeyRound, ShieldCheck, XCircle } from "lucide-react";
 import { isLocale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/get-dictionary";
 import { getOrderForCustomer } from "@/lib/server/orders";
 import { getSettingsSafe } from "@/lib/server/settings";
+import { describeMethod, methodAvailability, paymentsForOrder } from "@/lib/server/payments";
+import { storedOrderToken } from "@/lib/server/order-access";
+import { qrSvg } from "@/lib/server/qr";
 import { formatDate, formatEGP } from "@/lib/format";
 import { href } from "@/lib/links";
 import { contact } from "@/lib/site";
@@ -14,8 +17,13 @@ import { Button } from "@/components/ui/button";
 import { LogoMark } from "@/components/brand/logo";
 import { CopyInline } from "@/components/forms/copy-inline";
 import { PrintButton } from "@/components/sections/print-button";
+import { PayPanel } from "@/components/forms/pay-panel";
+import { OrderWatcher } from "@/components/forms/order-watcher";
+import { cn } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
+
+const minutesSince = (iso: string) => (Date.now() - new Date(iso).getTime()) / 60_000;
 
 export async function generateMetadata({ params }: PageProps<"/[locale]/order/[id]">): Promise<Metadata> {
   const { id } = await params;
@@ -26,7 +34,8 @@ export default async function OrderPage({ params, searchParams }: PageProps<"/[l
   const { locale, id } = await params;
   if (!isLocale(locale)) notFound();
   const sp = await searchParams;
-  const token = typeof sp.t === "string" ? sp.t : "";
+  // The link's token, or the one kept in this browser when the order was placed (so coming back from the payment page works).
+  const token = (typeof sp.t === "string" && sp.t) || (await storedOrderToken(id));
   const [dict, settings, order] = await Promise.all([getDictionary(locale), getSettingsSafe(), getOrderForCustomer(id, token).catch(() => null)]);
   const t = dict.order;
 
@@ -35,17 +44,70 @@ export default async function OrderPage({ params, searchParams }: PageProps<"/[l
       <div className="container-page max-w-xl pt-36 pb-8 text-center">
         <LogoMark className="mx-auto size-14" />
         <p className="mt-6 text-muted">{fill(t.notFound, { email: contact.support })}</p>
+        <p className="mt-3 text-sm text-muted">{t.noAccess}</p>
       </div>
     );
   }
 
+  const payments = await paymentsForOrder(order.id).catch(() => []);
+  const latest = payments[0];
+  const online = order.method === "paymob";
+  const methods = methodAvailability(settings);
+  // A payment counts as "in progress" for half an hour after the customer opened the payment page.
+  const fresh = latest ? minutesSince(latest.updatedAt) < 30 : false;
+  const inProgress = online && order.status === "pending" && !!latest && (latest.status === "pending" || (latest.status === "created" && fresh));
+  const needsPayment = online && order.status === "pending" && !inProgress;
+  const failed = latest?.status === "failed" || latest?.status === "mismatch";
+  const notice: "failed" | "gateway" | null = needsPayment ? (failed ? "failed" : sp.pay === "retry" || latest?.status === "error" ? "gateway" : null) : null;
+  const waitingKiosk = inProgress && (latest?.method === "kiosk" || (latest?.method ?? "").startsWith("aggregator"));
+
   const Icon = order.status === "paid" ? CheckCircle2 : order.status === "pending" ? Clock : XCircle;
-  const title = order.status === "paid" ? t.paidTitle : order.status === "pending" ? t.pendingTitle : t.rejectedTitle;
-  const body = order.status === "paid" ? t.paidBody : order.status === "pending" ? t.pendingBody : fill(t.rejectedBody, { email: contact.support });
+  const title =
+    order.status === "paid" ? t.paidTitle : order.status === "rejected" ? t.rejectedTitle : needsPayment ? t.payTitle : inProgress ? t.confirmingTitle : t.pendingTitle;
+  const body =
+    order.status === "paid"
+      ? t.paidBody
+      : order.status === "rejected"
+        ? fill(t.rejectedBody, { email: contact.support })
+        : needsPayment
+          ? t.payBody
+          : inProgress
+            ? waitingKiosk
+              ? t.confirmingKiosk
+              : t.confirmingBody
+            : t.pendingBody;
   const slugs = [...new Set(order.items.map((i) => i.slug))];
+  const paidOnline = order.status === "paid" && online;
+  const steps: { label: string; state: "done" | "current" | "todo" | "failed" }[] = [
+    { label: t.progress.placed, state: "done" },
+    { label: t.progress.payment, state: order.status === "paid" ? "done" : order.status === "rejected" ? "failed" : "current" },
+    { label: t.progress.keys, state: order.status === "paid" ? "done" : "todo" },
+  ];
 
   return (
     <div className="container-page max-w-4xl pt-28 pb-8 sm:pt-36">
+      <ol aria-label={fill(t.title, { id: order.id })} className="mx-auto mb-10 flex max-w-md items-center justify-center">
+        {steps.map((step, i) => (
+          <li key={step.label} className="flex flex-1 items-center last:flex-none">
+            <span className="flex flex-col items-center gap-1.5 text-center">
+              <span
+                aria-current={step.state === "current" ? "step" : undefined}
+                className={cn(
+                  "inline-flex size-8 items-center justify-center rounded-full border text-xs font-semibold",
+                  step.state === "done" && "border-[color-mix(in_oklab,var(--success)_60%,transparent)] bg-[color-mix(in_oklab,var(--success)_16%,transparent)] text-success",
+                  step.state === "current" && "border-[color-mix(in_oklab,var(--accent)_70%,transparent)] bg-[color-mix(in_oklab,var(--accent)_16%,transparent)] text-accent-fg shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent)_14%,transparent)]",
+                  step.state === "todo" && "border-border-strong text-muted",
+                  step.state === "failed" && "border-[color-mix(in_oklab,var(--danger)_60%,transparent)] bg-[color-mix(in_oklab,var(--danger)_12%,transparent)] text-danger",
+                )}
+              >
+                {step.state === "done" ? <Check className="size-4" aria-hidden /> : step.state === "failed" ? <XCircle className="size-4" aria-hidden /> : i + 1}
+              </span>
+              <span className={cn("text-[11px]", step.state === "todo" ? "text-muted" : "text-fg-soft")}>{step.label}</span>
+            </span>
+            {i < steps.length - 1 ? <span aria-hidden className={cn("mx-2 mb-5 h-px flex-1", step.state === "done" ? "bg-[color-mix(in_oklab,var(--success)_50%,transparent)]" : "bg-border-strong")} /> : null}
+          </li>
+        ))}
+      </ol>
       <div className="text-center">
         <span
           className={`mx-auto inline-flex size-16 items-center justify-center rounded-full border ${
@@ -63,7 +125,23 @@ export default async function OrderPage({ params, searchParams }: PageProps<"/[l
         <p className="mt-3 font-mono text-xs text-muted">{fill(t.title, { id: order.id })}</p>
       </div>
 
-      {order.status === "pending" ? (
+      {inProgress && token ? <OrderWatcher id={order.id} token={token} initialPayment={latest?.status ?? null} label={t.confirmingTitle} /> : null}
+
+      {online && order.status === "pending" && token ? (
+        <PayPanel
+          orderId={order.id}
+          token={token}
+          totalLabel={formatEGP(order.total, locale, true)}
+          methods={methods}
+          t={dict.checkout}
+          o={t}
+          instapay={{ number: settings.instapayNumber, name: settings.instapayName, link: settings.instapayLink, qr: await qrSvg(settings.instapayLink) }}
+          notice={notice}
+          folded={inProgress}
+        />
+      ) : null}
+
+      {order.status === "pending" && !online ? (
         <div className="mx-auto mt-10 grid max-w-xl gap-4 rounded-2xl border border-border bg-surface p-6">
           <div className="flex items-baseline justify-between">
             <span className="text-sm text-muted">{t.amountDue}</span>
@@ -78,6 +156,13 @@ export default async function OrderPage({ params, searchParams }: PageProps<"/[l
           </p>
           <p className="rounded-xl border border-[color-mix(in_oklab,var(--warning)_35%,transparent)] bg-[color-mix(in_oklab,var(--warning)_8%,transparent)] px-4 py-3 text-sm text-warning">{t.bookmark}</p>
         </div>
+      ) : null}
+
+      {paidOnline ? (
+        <p className="mx-auto mt-6 flex w-fit items-center gap-2 rounded-full border border-[color-mix(in_oklab,var(--success)_35%,transparent)] bg-[color-mix(in_oklab,var(--success)_8%,transparent)] px-4 py-1.5 text-xs text-success">
+          <ShieldCheck className="size-3.5" aria-hidden /> {t.paidOnline}
+          {latest ? <span className="text-muted">· {describeMethod(latest)}</span> : null}
+        </p>
       ) : null}
 
       {order.status === "paid" ? (

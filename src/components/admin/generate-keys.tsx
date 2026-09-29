@@ -1,15 +1,16 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useState } from "react";
 import { Dialog } from "radix-ui";
 import { Download, KeyRound, Loader2, Plus, X } from "lucide-react";
+import { useKeepFormAction } from "@/components/admin/use-form-action";
 import { generateKeysAction, type ActionState } from "@/app/admin/actions";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/input";
 
 export function GenerateKeys({ products }: { products: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);
-  const [state, action, pending] = useActionState<ActionState, FormData>(generateKeysAction, undefined);
+  const [state, onSubmit, pending] = useKeepFormAction<ActionState>(generateKeysAction);
 
   const download = () => {
     if (!state?.keys?.length) return;
@@ -42,7 +43,7 @@ export function GenerateKeys({ products }: { products: { id: string; name: strin
               <X className="size-5" aria-hidden />
             </Dialog.Close>
           </div>
-          <form action={action} className="mt-5 grid gap-4">
+          <form onSubmit={onSubmit} className="mt-5 grid gap-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="How many" htmlFor="gk-count">
                 <Input id="gk-count" name="count" inputMode="numeric" defaultValue="100" dir="ltr" />

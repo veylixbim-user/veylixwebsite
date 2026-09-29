@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { useActionState } from "react";
 import { ArrowLeftToLine, Check, FileArchive, FolderUp, ImagePlus, Loader2, Trash2, Upload, X } from "lucide-react";
+import { useKeepFormAction } from "@/components/admin/use-form-action";
 import { saveProductAction, type ActionState } from "@/app/admin/actions";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/input";
@@ -51,7 +51,7 @@ function formatBytes(n: number) {
 type FolderEntry = { name: string; size: number; files: File[]; isDir: boolean; excludedByDefault: boolean };
 
 export function ProductForm({ initial, blobEnabled }: { initial: ProductFormValue; blobEnabled: boolean }) {
-  const [state, action, pending] = useActionState<ActionState, FormData>(saveProductAction, undefined);
+  const [state, onSubmit, pending] = useKeepFormAction<ActionState>(saveProductAction);
   const [name, setName] = React.useState(initial.name);
   const [slug, setSlug] = React.useState(initial.slug);
   const [slugEdited, setSlugEdited] = React.useState(Boolean(initial.id));
@@ -139,7 +139,7 @@ export function ProductForm({ initial, blobEnabled }: { initial: ProductFormValu
 
   const v = initial;
   return (
-    <form action={action} className="grid gap-6 xl:grid-cols-[1fr_360px]">
+    <form onSubmit={onSubmit} className="grid gap-6 xl:grid-cols-[1fr_360px]">
       {v.id ? <input type="hidden" name="id" value={v.id} /> : null}
       <input type="hidden" name="images" value={JSON.stringify(images)} />
       <input type="hidden" name="fileUrl" value={file.url} />

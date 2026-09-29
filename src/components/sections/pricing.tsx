@@ -18,9 +18,8 @@ import { Badge } from "@/components/ui/badge";
 import { SectionHeader } from "@/components/ui/section";
 import { useUI } from "@/components/providers/site-providers";
 import { ProductThumb } from "@/components/brand/product-thumb";
+import { PaymentBadges } from "@/components/brand/payment-marks";
 import { AddToCartButton } from "@/components/cart/add-to-cart-button";
-
-const OTHER_METHODS = ["card", "fawry", "wallet", "meeza"] as const;
 
 type Props = {
   locale: Locale;
@@ -236,17 +235,7 @@ export function PricingSection({ locale, t, common, methods, headingLevel = "h2"
           </ul>
           <div>
             <p className="mb-2.5 font-mono text-[11px] uppercase tracking-[0.18em] text-muted lg:text-end">{t.payWith}</p>
-            <ul className="flex flex-wrap gap-2 lg:justify-end">
-              <li className="ltr rounded-lg border border-[color-mix(in_oklab,var(--accent)_50%,transparent)] bg-[color-mix(in_oklab,var(--accent)_10%,transparent)] px-3 py-1.5 text-xs font-semibold text-accent-fg">
-                InstaPay
-              </li>
-              {OTHER_METHODS.map((mth) => (
-                <li key={mth} className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-muted">
-                  {methods[mth]}
-                  <span className="rounded bg-surface-3 px-1 py-px text-[9px] font-medium uppercase tracking-wide">{t.comingSoon}</span>
-                </li>
-              ))}
-            </ul>
+            <PaymentBadges methods={shop.methods} labels={methods} soon={t.comingSoon} className="lg:justify-end" />
           </div>
         </div>
       </div>

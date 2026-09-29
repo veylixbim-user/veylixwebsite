@@ -6,6 +6,7 @@ import { ProductIcon } from "@/components/brand/product-icon";
 import { ProductArt } from "@/components/mockups/product-art";
 import { CircuitTraces } from "@/components/mockups/circuit-traces";
 import { FloorPlan } from "@/components/mockups/floor-plan";
+import { CableTrayRun, OneLinePower, PluginPlug, PowerScene } from "@/components/mockups/electrical";
 import { RevitWindow } from "@/components/mockups/revit-window";
 import { AdminHeader } from "@/components/admin/page-header";
 import { AssetCard, LibraryOptions } from "@/components/admin/library/asset-card";
@@ -98,6 +99,27 @@ export default function LibraryPage() {
             </AssetCard>
             <AssetCard title="Floor plan — circuited" note="Home-runs draw in" fileName="veylix-floor-plan" previewClassName="m-1.5 overflow-hidden rounded-xl border border-border bg-[#0b1017] p-3">
               <FloorPlan variant="after" animate />
+            </AssetCard>
+            <AssetCard title="Panel → tray → conduit → fixtures (powered)" note="Current flows, lights switch on — animated SVG" fileName="veylix-power-scene" previewClassName="m-1.5 overflow-hidden rounded-xl border border-border bg-[var(--plan-bg)] p-2">
+              <PowerScene layer="power" labels={{ tray: "Ladder tray along the corridor", conduit: "Conduit to the sockets and the pump", load: "38.4 kVA connected · 5 circuits live" }} />
+            </AssetCard>
+            <AssetCard title="Smart wiring layer" note="Circuits drawn from the panel to every device" fileName="veylix-wiring-scene" previewClassName="m-1.5 overflow-hidden rounded-xl border border-border bg-[var(--plan-bg)] p-2">
+              <PowerScene layer="wiring" />
+            </AssetCard>
+            <AssetCard title="Conduit layout" note="Pipes and fittings draw in" fileName="veylix-conduit-scene" previewClassName="m-1.5 overflow-hidden rounded-xl border border-border bg-[var(--plan-bg)] p-2">
+              <PowerScene layer="conduit" labels={{ tray: "", conduit: "Conduit to the sockets and the pump", load: "" }} />
+            </AssetCard>
+            <AssetCard title="Cable tray / ladder layout" note="Ladder trunk along the ceiling" fileName="veylix-tray-scene" previewClassName="m-1.5 overflow-hidden rounded-xl border border-border bg-[var(--plan-bg)] p-2">
+              <PowerScene layer="tray" labels={{ tray: "Ladder tray along the corridor", conduit: "", load: "" }} />
+            </AssetCard>
+            <AssetCard title="Plugin clicking into Revit" note="Loops — the VEYLIX card slides into the ribbon" fileName="veylix-plugin-plug" previewClassName="m-1.5 rounded-xl border border-border bg-[var(--plan-bg)] p-4">
+              <PluginPlug />
+            </AssetCard>
+            <AssetCard title="Cable tray with cables" note="Cables flowing through a ladder tray" fileName="veylix-cable-tray" previewClassName="m-1.5 rounded-xl border border-border bg-[var(--plan-bg)] p-4">
+              <CableTrayRun />
+            </AssetCard>
+            <AssetCard title="One-line power flow" note="Utility → breaker → panel → circuits → loads" fileName="veylix-one-line-power" previewClassName="m-1.5 rounded-xl border border-border bg-[var(--plan-bg)] p-4">
+              <OneLinePower />
             </AssetCard>
             <AssetCard title="Revit window" note="Homepage product mockup — HTML" fileName="veylix-revit-window" exportable={false} replay={false} previewClassName="p-1.5">
               <RevitWindow file="Tower-B_Electrical.rvt" status="VEYLIX ready" schedule="Panel LP-2A" connected="Connected load" demand="Demand" />

@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { query } from "./db";
 import { getSetting, sessionSecret, setSetting } from "./settings";
 import { mfaEnabled, verifyMfa } from "./totp";
+import { logSecurity } from "./security-log";
+import { notifyInbox } from "./mail";
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number, opts: { N: number; r: number; p: number; maxmem: number }) => Promise<Buffer>;
 
@@ -90,20 +92,29 @@ function signSession(expires: number, key: string) {
 export async function login(password: string, code?: string): Promise<{ ok: true } | { ok: false; error?: string; needCode?: boolean }> {
   const ip = await clientIp();
   const locked = await lockedUntil(ip);
-  if (locked) return { ok: false, error: `Too many attempts. Try again after ${locked.toISOString().slice(11, 16)} UTC.` };
+  if (locked) {
+    await logSecurity("admin_lockout", "sign-in attempt while locked", ip);
+    return { ok: false, error: `Too many attempts. Try again after ${locked.toISOString().slice(11, 16)} UTC.` };
+  }
   if (!(await passwordConfigured())) return { ok: false, error: "Admin password is not set. Add ADMIN_PASSWORD in your hosting environment variables." };
   if (!(await checkPassword(password))) {
     await recordFailure(ip);
+    await logSecurity("admin_login_failed", "wrong password", ip);
     return { ok: false, error: "Wrong password." };
   }
   if (await mfaEnabled()) {
     if (!code?.trim()) return { ok: false, needCode: true };
     if (!(await verifyMfa(code))) {
       await recordFailure(ip); // wrong codes count towards the same lockout
+      await logSecurity("admin_login_failed", "wrong two-step code", ip);
       return { ok: false, needCode: true, error: "That code didn't work. Use the current 6-digit code from your authenticator app, or a recovery code." };
     }
   }
   await query("DELETE FROM login_attempts WHERE ip = $1", [ip]);
+  await logSecurity("admin_login", "signed in", ip);
+  // Tell the owner about every admin sign-in, so a stolen password is noticed the first time it is used.
+  const agent = ((await headers()).get("user-agent") ?? "unknown").slice(0, 160);
+  notifyInbox("VEYLIX admin sign-in", `Someone signed in to the admin panel.\n\nTime: ${new Date().toISOString()}\nAddress: ${ip}\nBrowser: ${agent}\n\nIf this was not you, change the admin password now (Admin → Settings) and turn on two-step sign-in.`).catch(() => undefined);
   const expires = Date.now() + SESSION_HOURS * 3_600_000;
   const store = await cookies();
   store.set(ADMIN_COOKIE, `${expires}.${signSession(expires, await sessionKey())}`, {

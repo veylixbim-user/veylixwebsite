@@ -112,6 +112,55 @@ export function ProductArt({ art }: { art: ArtId }) {
           ))}
         </svg>
       );
+    case "wiring":
+      return (
+        <svg {...common}>
+          <rect x="14" y="26" width="34" height="68" rx="4" stroke="var(--accent)" strokeWidth="1.4" />
+          {[40, 60, 80].map((y) => (
+            <path key={y} d={`M22 ${y} H40`} stroke="var(--muted)" strokeWidth="1.2" />
+          ))}
+          {[
+            ["M48 40 H120 L138 22 H190", "var(--accent)"],
+            ["M48 60 H190", "var(--violet)"],
+            ["M48 80 H120 L138 98 H190", "var(--success)"],
+          ].map(([d, c], i) => (
+            <path key={i} className="art-trace" pathLength={1} d={d} stroke={c} strokeWidth="1.6" style={{ animationDelay: `${i * 90}ms` }} />
+          ))}
+          {[22, 60, 98].map((y, i) => (
+            <rect key={y} x="190" y={y - 6} width="30" height="12" rx="3" stroke={["var(--accent)", "var(--violet)", "var(--success)"][i]} strokeWidth="1.3" />
+          ))}
+        </svg>
+      );
+    case "tray":
+      return (
+        <svg {...common}>
+          <g stroke="var(--border-strong)" strokeWidth="1.6">
+            <path d="M12 40 H170 L220 90" />
+            <path d="M12 64 H160 L196 100" />
+          </g>
+          <g stroke="var(--border-strong)" strokeWidth="1">
+            {[28, 48, 68, 88, 108, 128, 148].map((x) => (
+              <path key={x} d={`M${x} 40 V64`} />
+            ))}
+          </g>
+          {["var(--violet)", "var(--accent)", "var(--success)"].map((c, i) => (
+            <path key={c} className="art-trace" pathLength={1} d={`M12 ${46 + i * 7} H${168 - i * 4} L${214 - i * 5} ${92 - i * 1}`} stroke={c} strokeWidth="1.6" style={{ animationDelay: `${i * 90}ms` }} />
+          ))}
+        </svg>
+      );
+    case "plugin":
+      return (
+        <svg {...common}>
+          <rect x="18" y="24" width="204" height="72" rx="8" stroke="var(--border-strong)" />
+          <path d="M18 44 H222" stroke="var(--border-strong)" />
+          <rect x="120" y="54" width="86" height="32" rx="6" stroke="var(--success)" strokeWidth="1.4" strokeDasharray="3 3" />
+          <g className="art-lux">
+            <rect x="126" y="58" width="74" height="24" rx="5" fill="color-mix(in oklab, var(--success) 12%, transparent)" stroke="var(--success)" strokeWidth="1.4" />
+            <path d="M136 66 L143 76 L150 66" stroke="var(--success)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </g>
+          <path className="art-trace" pathLength={1} d="M30 70 H112" stroke="var(--success)" strokeWidth="1.6" />
+        </svg>
+      );
     case "bundle":
       return (
         <svg {...common}>
