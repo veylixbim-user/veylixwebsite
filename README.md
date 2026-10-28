@@ -1,7 +1,8 @@
 # VEYLIX — Website, store and license server
 
 The VEYLIX website sells electrical BIM plugins for Autodesk Revit. It runs in English and Arabic (with full right-to-left layout) and prices everything in Egyptian Pounds.
-It is also the **store** (InstaPay orders), the **download portal** (product key required), the
+It is also the **store** (Visa / Mastercard / Meeza cards, mobile wallets, Fawry, installments and InstaPay through
+Paymob, plus manual InstaPay transfers), the **download portal** (product key required), the
 **license server** the Revit plugins talk to, and an **admin panel** for running all of it.
 
 Contact / support inbox: **veylixbim@gmail.com**. Customers write here, and every email the site sends comes from it.
@@ -38,11 +39,13 @@ Contact / support inbox: **veylixbim@gmail.com**. Customers write here, and ever
 | **Dashboard** | Keys, active PCs, pending payments, recent activity and a setup checklist. |
 | **Products** | Add a plugin: name, EN/AR tagline, description and features, prices (monthly / yearly EGP), Revit versions, images, **card artwork**, and the installer. **Choose plugin folder** zips your build folder in the browser. Source code, `obj/`, `backup/`, `.csproj`, `.py`, `build.bat` and similar files are unticked automatically. Each product page also has **Download VeylixLicense.cs** (see below). |
 | **License keys** | 1,000 keys are generated on your first sign-in. Search, filter, **export CSV**, generate more (for one product or all products; trial or paid). **Manage** a key to revoke or restore it, reset its PC, "ask for the key now", or set its expiry, check interval, owner or product. |
-| **Orders** | InstaPay orders waiting for you. Check the transfer in your bank app, then **Payment received — issue keys**. Keys appear on the customer's order page and are emailed to them. You can also reject an order, which emails the customer too. |
+| **Orders** | Online payments (card, wallet, Fawry, InstaPay through Paymob) are confirmed automatically — the keys are issued and emailed for you. **Needs your check** lists manual InstaPay transfers: check the transfer in your bank app, then **Payment received — issue keys**. **New payment link** creates a secure link to send a customer (also for renewals). **Check with Paymob** recovers a payment whose confirmation was missed. You can also reject or cancel an order, which emails the customer. |
+| **Payments** | Every online payment attempt as reported by Paymob, with totals for the last 30 days. Anything odd (wrong amount, a second payment, a refund) is flagged here and emailed to you. |
 | **Inbox** | Messages from the website's contact forms. Reply from the panel; the message is also forwarded to Gmail. |
 | **Customers** | Everyone who gave an email address: buyers, trial users, newsletter sign-ups and people who wrote in. Email any of them, copy all addresses for BCC, or export CSV. |
-| **Design library** | All the original VEYLIX illustrations and animations: product line-art, icon badges, logo (static and animated), hero circuit traces, command-palette terminal, panel schedule, floor plan, before/after slider, counters, marquee. Replay them and download them as **SVG** (animated or still) or **PNG**. |
-| **Settings** | License check interval (default 30 days), free-trial length and on/off, renewal grace (default 3 days), InstaPay number and name, VAT, email status and a test email, **two-step sign-in**, admin password, the license public key. |
+| **Design library** | All the VEYLIX illustrations and animations: product line-art, icon badges, logo (static and animated), hero circuit traces, command-palette terminal, panel schedule, floor plan, before/after slider, counters, marquee, and the electrical scenes — panel → cable tray → conduit → luminaires/sockets/equipment (wiring, conduit, tray and powered-on views), the plugin clicking into Revit, a cable tray with cables and a one-line power flow. Replay them and download them as **SVG** (animated or still) or **PNG**. |
+| **Security** | Admin sign-ins (each one is also emailed to you), failed sign-ins and lockouts, blocked bots and cross-site requests, and suspicious payment events. Kept for 90 days. |
+| **Settings** | **Online payments** (Paymob status, integration ID per method, "Test the Paymob connection"), which payment methods the checkout offers, InstaPay number, name and payment link (shown with a QR code), license check interval (default 30 days), free-trial length and on/off, renewal grace (default 3 days), VAT, email status and a test email, **two-step sign-in**, **signed-in devices** (end any session), admin password, the license public key. |
 
 ### Email
 
@@ -82,8 +85,9 @@ Admin → **Orders → New payment link** creates a secure link for a customer (
 > renewals, offline, clock changes…), what the customer sees, what you can do, and the test that proves it — is in
 > **[docs/SECURITY-AND-LICENSING.md](docs/SECURITY-AND-LICENSING.md)**.
 
-1. **Buying:** the customer pays by InstaPay to **01100444395** and enters the transfer reference. You confirm
-   the payment in **Orders**, and a product key (`VLX-XXXX-XXXX-XXXX-XXXX`) is issued.
+1. **Buying:** the customer pays online (card, wallet, Fawry, installments or InstaPay through Paymob) and the
+   product key (`VLX-XXXX-XXXX-XXXX-XXXX`) is issued automatically the moment Paymob confirms it — or pays by
+   InstaPay transfer to **01100444395**, enters the reference, and you confirm it in **Orders**.
 2. **Downloading:** `/download` asks for the product key. Only a valid key for that plugin unlocks the installer.
 3. **Activating inside Revit:** the first command asks for the key. The server **locks the key to that PC**
    (a hardware ID made from hashed SMBIOS UUID, board serial, CPU ID, Windows ID, drive serial and MAC
@@ -126,17 +130,25 @@ is verified against real server licenses.
 
 - **Licenses can't be forged or edited.** They are signed server-side (RSA-2048, SHA-256), and the plugin only
   holds the public key. A replayed server reply is rejected: each request carries a one-time nonce.
-- **One PC per key.** A key is locked to a hardware ID (Windows machine GUID + system volume serial + computer
-  name). The license file is encrypted with Windows DPAPI and ignored on any other PC.
+- **One PC per key.** A key is locked to a hardware ID built from hashed SMBIOS UUID, board serial, CPU ID, Windows
+  machine GUID, system volume serial and physical MAC addresses (raw values never leave the PC). A Windows reinstall or
+  a new network card keeps the license; another PC or a cloned VM doesn't. The license file is encrypted with Windows
+  DPAPI and ignored on any other PC.
 - **Clock tricks** (setting Windows' date back) are detected and force a key re-entry.
 - **Brute force is throttled.** Activation, status, download, trial, checkout and contact endpoints are rate-limited.
   Admin sign-in locks out after 5 wrong passwords for 15 minutes.
 - **Admin:**
   - The password is stored hashed (scrypt); two-step sign-in (authenticator app + recovery codes) is built in.
-  - Sessions are signed `__Host-` cookies (HttpOnly, Secure, SameSite=Strict), and changing the password signs
-    out every session.
+  - Sessions are stored on the server: the `__Host-` cookie (HttpOnly, Secure, SameSite=Strict) holds a random
+    256-bit id and only its hash is kept. **Settings → Signed-in devices** ends any session; sessions also end after
+    12 hours, after 2 hours without use, on sign-out, and when the password changes.
+  - Every admin sign-in is emailed to you and logged in **Security**.
   - Uploads are limited to signed-in admins from the same site.
-- **Website:** strict security headers (CSP, HSTS, no framing), rate limits on every public form, and CSV exports
+- **Payments:** card numbers are typed on Paymob's page and never reach this site. Keys are issued only from a
+  confirmation whose HMAC-SHA512 signature checks out, for exactly the amount ordered, once per Paymob transaction.
+  Wrong amounts, second payments and refunds are flagged to you, never auto-approved.
+- **Website:** strict security headers (CSP, HSTS, no framing, Permissions-Policy, CORP), rate limits on every
+  public form, invisible bot traps on checkout, cross-site POSTs refused, `/.well-known/security.txt`, and CSV exports
   safe against spreadsheet formulas.
 - **Installers** are only handed out for a valid key. Your source code is excluded from uploaded folders by default.
 
