@@ -3,18 +3,20 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Building2, Loader2, Lock, RefreshCw, ShieldCheck, Smartphone } from "lucide-react";
+import { Building2, CalendarClock, CreditCard, ExternalLink, Landmark, Loader2, Lock, RefreshCw, ShieldCheck, Store, Wallet, Zap } from "lucide-react";
 import type { Dictionary } from "@/i18n/dictionaries/en";
 import type { Locale } from "@/i18n/config";
 import { cartStore } from "@/lib/cart-store";
 import { formatEGP } from "@/lib/format";
 import { href } from "@/lib/links";
 import { cartTotals, priceOf } from "@/lib/pricing";
-import { fill } from "@/lib/utils";
+import { PAYMENT_METHODS, type PaymentChoice } from "@/lib/payment-methods";
+import { cn, fill } from "@/lib/utils";
 import { EG_MOBILE_RE, EMAIL_RE, normalizePhone, normalizeTaxId, TAX_ID_RE } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import { ProductThumb } from "@/components/brand/product-thumb";
+import { MastercardMark, VisaMark } from "@/components/brand/payment-marks";
 import { CopyInline } from "@/components/forms/copy-inline";
 import { useCart, useUI } from "@/components/providers/site-providers";
 
@@ -27,12 +29,49 @@ function readDevice(): string | undefined {
   }
 }
 
+const CONTACT_KEY = "veylix-contact";
+const nowMs = () => Date.now();
+
+type Saved = { name?: string; email?: string; phone?: string };
+
+/** What this browser remembered from the last order (read without touching state, so there is no flash or extra render). */
+function subscribeNothing() {
+  return () => {};
+}
+function readSavedContact(): string {
+  try {
+    return window.localStorage.getItem(CONTACT_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const METHOD_ICON: Record<PaymentChoice, React.ComponentType<{ className?: string }>> = {
+  card: CreditCard,
+  wallet: Wallet,
+  instapay: Zap,
+  kiosk: Store,
+  installments: CalendarClock,
+  transfer: Landmark,
+};
+
 type Props = {
   locale: Locale;
   t: Dictionary["checkout"];
   cart: Dictionary["cart"];
   common: Dictionary["common"];
 };
+
+function StepTitle({ n, children }: { n: number; children: React.ReactNode }) {
+  return (
+    <span className="flex items-center gap-2.5 text-base font-semibold">
+      <span aria-hidden className="inline-flex size-6 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--accent)_16%,transparent)] font-mono text-xs text-accent-fg">
+        {n}
+      </span>
+      {children}
+    </span>
+  );
+}
 
 export function CheckoutForm({ locale, t, cart, common }: Props) {
   const router = useRouter();
@@ -41,16 +80,48 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
   const lines = items.filter((i) => priceOf(catalog.get(i.productId), i.billing) != null);
   const { subtotal, vat, total } = cartTotals(lines, catalog, shop.vatRate);
 
-  const [values, setValues] = React.useState({ name: "", email: "", phone: "", company: "", taxId: "", address: "", paymentRef: "", renewKey: "" });
+  const available = PAYMENT_METHODS.filter((m) => shop.methods[m]);
+  const [method, setMethod] = React.useState<PaymentChoice>(available[0] ?? "transfer");
+  const online = method !== "transfer";
+
+  const savedJson = React.useSyncExternalStore(subscribeNothing, readSavedContact, () => "");
+  const saved = React.useMemo<Saved>(() => {
+    try {
+      return savedJson ? (JSON.parse(savedJson) as Saved) : {};
+    } catch {
+      return {};
+    }
+  }, [savedJson]);
+  // Only what the customer typed lives in state; the remembered contact details show through until they edit them.
+  const [typed, setTyped] = React.useState<Partial<Record<"name" | "email" | "phone" | "company" | "taxId" | "address" | "paymentRef" | "renewKey", string>>>({});
+  const values = {
+    name: typed.name ?? saved.name ?? "",
+    email: typed.email ?? saved.email ?? "",
+    phone: typed.phone ?? saved.phone ?? "",
+    company: typed.company ?? "",
+    taxId: typed.taxId ?? "",
+    address: typed.address ?? "",
+    paymentRef: typed.paymentRef ?? "",
+    renewKey: typed.renewKey ?? "",
+  };
   const [business, setBusiness] = React.useState(false);
   const [renew, setRenew] = React.useState(false);
+  const [remember, setRemember] = React.useState(true);
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const [submitting, setSubmitting] = React.useState(false);
+  const [redirecting, setRedirecting] = React.useState(false);
   /** Plugins this email already owns (server asked us to confirm the purchase is for another PC). */
   const [owned, setOwned] = React.useState<string[] | null>(null);
+  const [honeypot, setHoneypot] = React.useState("");
+  const mountedAt = React.useRef(0);
+
+  // Bots fill forms within a blink; people don't. The server compares this with the time the form was submitted.
+  React.useEffect(() => {
+    mountedAt.current = nowMs();
+  }, []);
 
   const set = (key: keyof typeof values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setValues((v) => ({ ...v, [key]: e.target.value }));
+    setTyped((v) => ({ ...v, [key]: e.target.value }));
     if (errors[key])
       setErrors((prev) => {
         const next = { ...prev };
@@ -64,7 +135,7 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
     if (values.name.trim().length < 2) e.name = t.errors.name;
     if (!EMAIL_RE.test(values.email.trim())) e.email = t.errors.email;
     if (!EG_MOBILE_RE.test(normalizePhone(values.phone))) e.phone = t.errors.phone;
-    if (values.paymentRef.trim().length < 4) e.paymentRef = t.errors.paymentRef;
+    if (!online && values.paymentRef.trim().length < 4) e.paymentRef = t.errors.paymentRef;
     if (business) {
       if (values.company.trim().length < 2) e.company = t.errors.company;
       if (!TAX_ID_RE.test(normalizeTaxId(values.taxId))) e.taxId = t.errors.taxId;
@@ -75,6 +146,7 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
 
   async function onSubmit(ev: React.SyntheticEvent, confirmAdditional = false) {
     ev.preventDefault();
+    if (submitting) return;
     setOwned(null);
     const e = validate();
     setErrors(e);
@@ -91,15 +163,20 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
           items: lines.map((l) => ({ productId: l.productId, billing: l.billing, quantity: l.quantity })),
           customer: { name: values.name, email: values.email, phone: values.phone },
           business: business ? { company: values.company, taxId: values.taxId, address: values.address } : undefined,
-          paymentRef: values.paymentRef,
+          paymentMethod: method,
+          paymentRef: online ? undefined : values.paymentRef,
           renewKey: renew ? values.renewKey : undefined,
           device: readDevice(),
           confirmAdditional,
+          locale,
+          website: honeypot,
+          elapsed: nowMs() - mountedAt.current,
         }),
       });
-      const data = (await res.json()) as { ok: boolean; id?: string; token?: string; errors?: Record<string, string>; licensed?: string[] };
+      const data = (await res.json()) as { ok: boolean; id?: string; token?: string; payUrl?: string; payError?: string; errors?: Record<string, string>; licensed?: string[] };
       if (data.errors?.form === "already_licensed") {
         setOwned(data.licensed?.length ? data.licensed : [""]);
+        setSubmitting(false);
         return;
       }
       if (!data.ok || !data.id || !data.token) {
@@ -107,13 +184,25 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
           Object.entries(data.errors ?? { form: "generic" }).map(([k, v]) => [k, (t.errors as Record<string, string>)[v] ?? (t.errors as Record<string, string>)[k] ?? t.errors.generic]),
         );
         setErrors(mapped);
+        setSubmitting(false);
         return;
       }
+      try {
+        if (remember) window.localStorage.setItem(CONTACT_KEY, JSON.stringify({ name: values.name, email: values.email, phone: values.phone }));
+        else window.localStorage.removeItem(CONTACT_KEY);
+      } catch {
+        /* storage unavailable */
+      }
       cartStore.clear();
-      router.push(`${href(locale, `/order/${data.id}`)}?t=${encodeURIComponent(data.token)}`);
+      if (data.payUrl) {
+        // Hand over to the secure payment page. The button stays busy until the browser leaves.
+        setRedirecting(true);
+        window.location.assign(data.payUrl);
+        return;
+      }
+      router.push(`${href(locale, `/order/${data.id}`)}?t=${encodeURIComponent(data.token)}${data.payError ? "&pay=retry" : ""}`);
     } catch {
       setErrors({ form: t.errors.generic });
-    } finally {
       setSubmitting(false);
     }
   }
@@ -131,58 +220,147 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
 
   const describedBy = (key: string, hint?: boolean) => (errors[key] ? `co-${key}-error` : hint ? `co-${key}-hint` : undefined);
   const totalLabel = formatEGP(total, locale, true);
+  const submitLabel = method === "kiosk" ? t.payKiosk : online ? fill(t.pay, { amount: totalLabel }) : t.submit;
+  const busyLabel = redirecting ? t.redirecting : common.loading;
 
   return (
-    <form onSubmit={onSubmit} noValidate className="grid gap-8 lg:grid-cols-12">
+    <form id="checkout-form" onSubmit={onSubmit} noValidate className="grid gap-8 pb-24 lg:grid-cols-12 lg:pb-0">
+      {/* Honeypot: invisible to people, tempting to bots. */}
+      <div aria-hidden className="absolute -start-[9999px] top-auto h-0 w-0 overflow-hidden">
+        <label>
+          Website
+          <input tabIndex={-1} autoComplete="off" name="website" value={honeypot} onChange={(e) => setHoneypot(e.target.value)} />
+        </label>
+      </div>
+
       <div className="grid gap-6 lg:col-span-7">
         <fieldset className="rounded-2xl border border-border bg-surface p-6">
-          <legend className="float-start mb-5 w-full text-base font-semibold">{t.contact}</legend>
+          <legend className="float-start mb-5 w-full">
+            <StepTitle n={1}>{t.contact}</StepTitle>
+          </legend>
           <div className="clear-both grid gap-4 sm:grid-cols-2">
             <Field label={t.name} htmlFor="co-name" error={errors.name} className="sm:col-span-2">
               <Input id="co-name" autoComplete="name" value={values.name} onChange={set("name")} aria-invalid={!!errors.name} aria-describedby={describedBy("name")} />
             </Field>
             <Field label={t.email} htmlFor="co-email" hint={t.emailHint} error={errors.email}>
-              <Input id="co-email" type="email" dir="ltr" autoComplete="email" value={values.email} onChange={set("email")} aria-invalid={!!errors.email} aria-describedby={describedBy("email", true)} />
+              <Input id="co-email" type="email" dir="ltr" autoComplete="email" inputMode="email" value={values.email} onChange={set("email")} aria-invalid={!!errors.email} aria-describedby={describedBy("email", true)} />
             </Field>
-            <Field label={t.phone} htmlFor="co-phone" hint={t.phoneHint} error={errors.phone}>
+            <Field label={t.phone} htmlFor="co-phone" hint={online ? t.phoneHint : t.phoneHintTransfer} error={errors.phone}>
               <Input id="co-phone" type="tel" dir="ltr" inputMode="tel" autoComplete="tel" placeholder="010 1234 5678" value={values.phone} onChange={set("phone")} aria-invalid={!!errors.phone} aria-describedby={describedBy("phone", true)} />
             </Field>
           </div>
+          <label className="mt-4 flex cursor-pointer items-center gap-2 text-xs text-muted">
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="size-4 accent-[var(--accent)]" />
+            {t.remember}
+          </label>
         </fieldset>
 
         <fieldset className="rounded-2xl border border-[color-mix(in_oklab,var(--accent)_40%,var(--border))] bg-[linear-gradient(160deg,color-mix(in_oklab,var(--accent)_6%,var(--surface)),var(--surface)_60%)] p-6">
-          <legend className="float-start mb-5 flex w-full items-center gap-2 text-base font-semibold">
-            <Smartphone className="size-4 text-accent-fg" aria-hidden /> {t.instapay.title}
+          <legend className="float-start mb-5 w-full">
+            <StepTitle n={2}>{t.chooseMethod}</StepTitle>
           </legend>
-          <ol className="clear-both grid gap-4 text-sm">
-            <li className="grid gap-2">
-              <span className="text-fg-soft">
-                1. {t.instapay.step1} <b className="text-fg">{totalLabel}</b> {t.instapay.step2}
-              </span>
-              <CopyInline value={shop.instapayNumber} />
-              {shop.instapayName ? (
-                <span className="text-xs text-muted">
-                  {t.instapay.accountName}: <span className="text-fg-soft">{shop.instapayName}</span>
-                </span>
-              ) : null}
-            </li>
-            <li className="text-fg-soft">2. {t.instapay.step3}</li>
-          </ol>
-          <div className="mt-4">
-            <Field label={t.instapay.reference} htmlFor="co-paymentRef" hint={t.instapay.referenceHint} error={errors.paymentRef}>
-              <Input id="co-paymentRef" dir="ltr" autoComplete="off" value={values.paymentRef} onChange={set("paymentRef")} aria-invalid={!!errors.paymentRef} aria-describedby={describedBy("paymentRef", true)} className="font-mono" />
-            </Field>
+          <div role="radiogroup" aria-label={t.chooseMethod} className="clear-both grid gap-3 sm:grid-cols-2">
+            {available.map((m) => {
+              const Icon = METHOD_ICON[m];
+              const info = t.method[m];
+              const selected = method === m;
+              return (
+                <label
+                  key={m}
+                  className={cn(
+                    "group relative flex cursor-pointer items-start gap-3 rounded-xl border p-3.5 transition-[border-color,background-color,box-shadow]",
+                    "has-[:focus-visible]:shadow-[0_0_0_4px_color-mix(in_oklab,var(--accent)_22%,transparent)]",
+                    selected
+                      ? "border-[color-mix(in_oklab,var(--accent)_70%,transparent)] bg-[color-mix(in_oklab,var(--accent)_10%,var(--surface))]"
+                      : "border-border bg-surface hover:border-border-strong hover:bg-surface-2",
+                  )}
+                >
+                  <input type="radio" name="paymentMethod" value={m} checked={selected} onChange={() => setMethod(m)} className="peer sr-only" />
+                  <span
+                    className={cn(
+                      "mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-lg border transition-colors",
+                      selected ? "border-[color-mix(in_oklab,var(--accent)_55%,transparent)] bg-[color-mix(in_oklab,var(--accent)_16%,transparent)] text-accent-fg" : "border-border bg-surface-2 text-muted",
+                    )}
+                  >
+                    <Icon className="size-[18px]" aria-hidden />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-fg">{info.title}</span>
+                      <span className="rounded bg-surface-3 px-1.5 py-px text-[10px] font-medium uppercase tracking-wide text-muted">{info.badge}</span>
+                    </span>
+                    <span className="mt-0.5 block text-xs leading-relaxed text-muted">{info.body}</span>
+                  </span>
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "mt-1 inline-flex size-4 shrink-0 items-center justify-center rounded-full border transition-colors",
+                      selected ? "border-accent bg-accent" : "border-border-strong",
+                    )}
+                  >
+                    {selected ? <span className="size-1.5 rounded-full bg-on-accent" /> : null}
+                  </span>
+                </label>
+              );
+            })}
           </div>
-          <div className="mt-5 border-t border-border pt-4">
-            <p className="text-xs text-muted">{t.otherMethods}</p>
-            <ul className="mt-2 flex flex-wrap gap-2">
-              {(["card", "fawry", "wallet", "meeza"] as const).map((m) => (
-                <li key={m} className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs text-muted">
-                  {t.methods[m]}
-                  <span className="rounded bg-surface-3 px-1 py-px text-[9px] uppercase tracking-wide">{common.comingSoon}</span>
-                </li>
-              ))}
-            </ul>
+
+          <div className="mt-5" aria-live="polite">
+            {online ? (
+              <div className="rounded-xl border border-border bg-bg-elevated/60 p-4 text-sm">
+                <p className="flex items-center gap-2 font-semibold text-fg">
+                  <ShieldCheck className="size-4 text-success" aria-hidden /> {t.online.title}
+                </p>
+                <p className="mt-2 text-fg-soft">{method === "kiosk" ? t.online.kiosk : method === "installments" ? t.online.installments : t.online.body}</p>
+                <p className="mt-2 text-xs text-muted">{t.online.after}</p>
+                {method === "card" ? (
+                  <div className="ltr mt-3 flex items-center gap-3 opacity-90" aria-hidden>
+                    <VisaMark className="h-3.5" />
+                    <MastercardMark className="h-5" />
+                    <span className="text-xs font-semibold text-muted">Meeza</span>
+                    <Lock className="ms-auto size-4 text-success" />
+                  </div>
+                ) : null}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-border bg-bg-elevated/60 p-4">
+                <p className="mb-3 text-sm font-semibold text-fg">{t.instapay.title}</p>
+                <ol className="grid gap-4 text-sm">
+                  <li className="grid gap-2">
+                    <span className="text-fg-soft">
+                      1. {t.instapay.step1} <b className="text-fg">{totalLabel}</b> {t.instapay.step2}
+                    </span>
+                    <CopyInline value={shop.instapayNumber} />
+                    {shop.instapayName ? (
+                      <span className="text-xs text-muted">
+                        {t.instapay.accountName}: <span className="text-fg-soft">{shop.instapayName}</span>
+                      </span>
+                    ) : null}
+                    {shop.instapayLink ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-4">
+                        <Button asChild variant="secondary" size="sm">
+                          <a href={shop.instapayLink} target="_blank" rel="noopener noreferrer">
+                            {t.instapay.openApp} <ExternalLink aria-hidden />
+                          </a>
+                        </Button>
+                        {shop.instapayQr ? (
+                          <div className="flex items-center gap-3 text-xs text-muted">
+                            <div role="img" aria-label={t.instapay.scan} className="size-24 shrink-0 rounded-lg bg-white p-1.5 [&>svg]:size-full" dangerouslySetInnerHTML={{ __html: shop.instapayQr }} />
+                            <span className="max-w-32">{t.instapay.scan}</span>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                  <li className="text-fg-soft">2. {t.instapay.step3}</li>
+                </ol>
+                <div className="mt-4">
+                  <Field label={t.instapay.reference} htmlFor="co-paymentRef" hint={t.instapay.referenceHint} error={errors.paymentRef}>
+                    <Input id="co-paymentRef" dir="ltr" autoComplete="off" value={values.paymentRef} onChange={set("paymentRef")} aria-invalid={!!errors.paymentRef} aria-describedby={describedBy("paymentRef", true)} className="font-mono" />
+                  </Field>
+                </div>
+              </div>
+            )}
           </div>
         </fieldset>
 
@@ -268,7 +446,7 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
           </dl>
           <div className="px-6 pb-6">
             {errors.form ? (
-              <p role="alert" className="mb-3 text-sm text-danger">
+              <p role="alert" className="mb-3 rounded-lg border border-[color-mix(in_oklab,var(--danger)_40%,var(--border))] bg-[color-mix(in_oklab,var(--danger)_8%,transparent)] px-3 py-2 text-sm text-danger">
                 {errors.form}
               </p>
             ) : null}
@@ -297,11 +475,11 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
             ) : null}
             <Button type="submit" size="lg" className="w-full" disabled={submitting}>
               {submitting ? <Loader2 className="animate-spin" aria-hidden /> : <Lock aria-hidden />}
-              {submitting ? common.loading : t.submit}
+              {submitting ? busyLabel : submitLabel}
             </Button>
             <p className="mt-4 flex gap-2 text-xs leading-relaxed text-muted">
               <ShieldCheck className="size-4 shrink-0 text-success" aria-hidden />
-              {t.secure}
+              {online ? t.secureOnline : t.secure}
             </p>
             <p className="mt-2 text-xs text-muted">
               <Link href={href(locale, "/legal/terms")} className="underline-offset-2 hover:underline">
@@ -311,6 +489,20 @@ export function CheckoutForm({ locale, t, cart, common }: Props) {
           </div>
         </div>
       </aside>
+
+      {/* Phones: the pay button stays in reach. */}
+      <div className="fixed inset-x-0 bottom-0 z-40 border-t border-border-strong bg-bg-elevated/95 px-4 py-3 backdrop-blur lg:hidden">
+        <div className="mx-auto flex max-w-lg items-center gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] text-muted">{t.total}</p>
+            <p className="text-lg font-semibold tabular-nums leading-tight">{totalLabel}</p>
+          </div>
+          <Button type="submit" className="ms-auto flex-1" disabled={submitting}>
+            {submitting ? <Loader2 className="animate-spin" aria-hidden /> : <Lock aria-hidden />}
+            {submitting ? busyLabel : method === "kiosk" ? t.payKiosk : online ? t.payShort : t.submit}
+          </Button>
+        </div>
+      </div>
     </form>
   );
 }

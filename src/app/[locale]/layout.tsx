@@ -7,6 +7,8 @@ import { isLocale, localeMeta, locales, type Locale } from "@/i18n/config";
 import { getDictionary } from "@/i18n/get-dictionary";
 import { getPublishedProducts, toCatalogItem } from "@/lib/server/products";
 import { getSettingsSafe } from "@/lib/server/settings";
+import { methodAvailability } from "@/lib/server/payments";
+import { qrSvg } from "@/lib/server/qr";
 import { href } from "@/lib/links";
 import { CONTACT_EMAIL, siteUrl } from "@/lib/site";
 import { SiteProviders } from "@/components/providers/site-providers";
@@ -122,6 +124,9 @@ export default async function LocaleLayout({ children, params }: LayoutProps<"/[
     activationDays: settings.activationDays,
     instapayNumber: settings.instapayNumber,
     instapayName: settings.instapayName,
+    instapayLink: settings.instapayLink,
+    instapayQr: await qrSvg(settings.instapayLink),
+    methods: methodAvailability(settings),
   };
   const plausible = process.env.NEXT_PUBLIC_PLAUSIBLE_DOMAIN;
 

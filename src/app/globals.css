@@ -612,3 +612,97 @@
     opacity: 1;
   }
 }
+
+/* Electrical scenes (components/mockups/electrical.tsx) */
+.flow-dash {
+  stroke-dasharray: 6 10;
+  animation: flow-dash 1.2s linear infinite;
+}
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -16;
+  }
+}
+.glow-on {
+  opacity: 0;
+  animation: glow-on 0.7s ease var(--delay, 0s) forwards;
+}
+@keyframes glow-on {
+  to {
+    opacity: 1;
+  }
+}
+.pulse-soft {
+  animation: pulse-dot 2s ease-in-out var(--delay, 0s) infinite;
+}
+.spin {
+  animation: spin-slow 2.4s linear infinite;
+}
+@keyframes spin-slow {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.plug-slide {
+  animation: plug-slide 5s cubic-bezier(0.6, 0, 0.3, 1) infinite;
+}
+@keyframes plug-slide {
+  0% {
+    transform: translateX(90px);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  45%,
+  100% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.plug-check {
+  transform-origin: 280px 70px;
+  animation: plug-check 5s ease infinite;
+}
+@keyframes plug-check {
+  0%,
+  44% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  52% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  60%,
+  92% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+.plug-spark {
+  animation: plug-spark 5s ease infinite;
+}
+@keyframes plug-spark {
+  0%,
+  42% {
+    opacity: 0;
+  }
+  46% {
+    opacity: 1;
+  }
+  56%,
+  100% {
+    opacity: 0;
+  }
+}
+/* Off-screen scenes stand still. */
+[data-play="0"] .flow-dash,
+[data-play="0"] .pulse-soft,
+[data-play="0"] .spin {
+  animation-play-state: paused;
+}

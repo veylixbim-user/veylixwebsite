@@ -85,6 +85,62 @@ export const SCHEMA_SQL: string[] = [
   )`,
   `CREATE INDEX IF NOT EXISTS orders_payref_idx ON orders (upper(regexp_replace(payment_ref, '[^A-Za-z0-9]', '', 'g')))`,
   `CREATE INDEX IF NOT EXISTS orders_renew_idx ON orders (renew_key) WHERE renew_key IS NOT NULL`,
+  // Online payments (Paymob): when the order was paid, and the page language to send the customer back to.
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at timestamptz`,
+  `ALTER TABLE orders ADD COLUMN IF NOT EXISTS locale text`,
+  // One row per online payment attempt. provider_order_id (Paymob's order id) is covered by Paymob's HMAC
+  // signature, so callbacks are matched on it — never on fields an attacker could edit.
+  `CREATE TABLE IF NOT EXISTS payments (
+    id serial PRIMARY KEY,
+    order_id text NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    provider text NOT NULL,
+    special_reference text NOT NULL UNIQUE,
+    intention_id text,
+    provider_order_id text,
+    amount_cents integer NOT NULL,
+    currency text NOT NULL DEFAULT 'EGP',
+    status text NOT NULL DEFAULT 'created',
+    transaction_id text,
+    method text,
+    detail text,
+    checked_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS payments_order_idx ON payments (order_id)`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS payments_provider_order_idx ON payments (provider, provider_order_id) WHERE provider_order_id IS NOT NULL`,
+  // Every callback we act on, keyed by the provider's transaction id + outcome: a replayed or duplicated
+  // callback hits the unique constraint and changes nothing.
+  `CREATE TABLE IF NOT EXISTS payment_events (
+    id serial PRIMARY KEY,
+    provider text NOT NULL,
+    event_key text NOT NULL,
+    payment_id integer,
+    source text NOT NULL,
+    outcome text NOT NULL,
+    detail text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (provider, event_key)
+  )`,
+  // Admin sign-in sessions (server-side, so they can be listed and revoked one by one).
+  `CREATE TABLE IF NOT EXISTS admin_sessions (
+    id text PRIMARY KEY,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_seen_at timestamptz NOT NULL DEFAULT now(),
+    expires_at timestamptz NOT NULL,
+    ip text,
+    user_agent text,
+    revoked boolean NOT NULL DEFAULT false
+  )`,
+  // Security events: sign-ins, lockouts, rejected payment callbacks, blocked bots, CSP reports.
+  `CREATE TABLE IF NOT EXISTS security_events (
+    id serial PRIMARY KEY,
+    kind text NOT NULL,
+    detail text,
+    ip text,
+    created_at timestamptz NOT NULL DEFAULT now()
+  )`,
+  `CREATE INDEX IF NOT EXISTS security_events_created_idx ON security_events (created_at DESC)`,
   `CREATE TABLE IF NOT EXISTS login_attempts (
     ip text PRIMARY KEY,
     failures integer NOT NULL DEFAULT 0,

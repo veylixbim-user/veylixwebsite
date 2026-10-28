@@ -266,7 +266,47 @@ keys table shows a **moved N×** badge, and **Reset device** clears the counter 
 | Hardware changes before `hw_limit` | Code (`HW_CHANGE_LIMIT`) | 3 per 30 days |
 | Plugin background check | Plugin | every 6 hours when online |
 | Admin lockout | Code | 5 wrong tries → 15 min per IP |
-| Admin session | Code | 12 hours |
+| Admin session | Code (stored in the database) | 12 hours, 2 hours idle; revocable per device |
 | Reminder emails | Vercel Cron (`vercel.json`) daily 06:00 UTC | 7 / 3 / 1 days before, and in grace |
 | `CRON_SECRET` | Vercel env var (recommended) | — |
 | `ADMIN_MFA_DISABLED` | Vercel env var (break-glass only) | unset |
+
+## 9. Online payments (Paymob)
+
+**Flow.** Checkout creates a pending order and a Paymob *payment intention* (amount in piasters, items incl. VAT, our own reference). The customer pays on Paymob's hosted page (card numbers never reach this site — no PCI scope). Paymob then (a) POSTs a signed callback to `/api/paymob/callback` and (b) redirects the browser to `/api/paymob/return/<order>`. Keys are issued only from an authenticated confirmation.
+
+**What is authenticated.** Paymob's HMAC-SHA512 over the 20 documented transaction fields (order checked against Paymob's worked example in `tests/e2e/paymob-vectors.mts`), compared in constant time. Anything without a valid signature is refused (401) and logged. A signed browser redirect is accepted the same way; a missed callback is recovered by asking Paymob directly (`PAYMOB_API_KEY`) when the customer's order page polls, from the admin "Check with Paymob" button, and from the daily job.
+
+**Money safety rules** (all covered by `tests/e2e/4-payments.mjs`, cases PM01–PM31):
+
+| Situation | Behaviour |
+| --- | --- |
+| Same confirmation delivered twice / replayed | No-op (unique event key per Paymob transaction); one key, one email |
+| Wrong amount or currency | No keys; payment marked `mismatch`; owner emailed |
+| Second successful payment on a paid order | No keys; owner told to refund |
+| Payment for an order the owner already rejected | No keys; owner told |
+| Refund / void reported by Paymob | Recorded, owner emailed; keys are **not** revoked automatically |
+| Declined payment | Order stays open; customer can retry or choose another method |
+| Fawry / Aman code (pending) | Order waits; page explains; key issued when paid (hours or days later) |
+| Callback never arrives | Recovered by inquiry (order page, admin button, daily job) |
+| Paymob outage at checkout | Order kept; customer retries from the order page |
+| Renewal paid online | The same key is extended from its old end date (no days lost) |
+| Callback for an unknown Paymob order | Ignored and logged |
+| Cross-site POST to checkout / pay / manual endpoints | 403 (Origin / Sec-Fetch-Site check) |
+| Bots | Hidden field + "submitted in under a second" trap → 400; rate limits per IP and per order |
+| Return address without cookie or a signed redirect | No order token is revealed (the token never goes to Paymob; it lives in an HttpOnly cookie) |
+
+**Also new in this round.** Every admin sign-in is emailed to the owner and logged; failed sign-ins, lockouts, blocked bots, cross-site requests and suspicious payment events appear in **Admin → Security** (90 days); `/.well-known/security.txt`; `Permissions-Policy`/CORP headers; admin forms no longer wipe what you typed when a value is rejected.
+
+**Admin sessions (server-side).** The admin cookie is a random 256-bit id (only its SHA-256 is stored in `admin_sessions`), so a session can be ended on the server: **Admin → Settings → Signed-in devices** lists every device (address, browser, last activity), ends one, or signs out all others. Sessions also end after 12 hours, after 2 hours without use, on sign-out, and on password change. Covered by `tests/e2e/5-sessions.mjs`.
+
+**Payment wording follows reality.** Until at least one online method is connected, every page that mentions payment (hero, pricing, FAQ, docs, legal) uses the InstaPay-only wording (`src/i18n/manual-payment-copy.ts`), so the site never promises a method that isn't live.
+
+**Not included (yet).** Cloudflare Turnstile, and Paymob saved-card/subscription callbacks (renewals are one payment per month, by design).
+
+| Setting | Where | Default |
+| --- | --- | --- |
+| `PAYMOB_SECRET_KEY`, `PAYMOB_PUBLIC_KEY`, `PAYMOB_HMAC_SECRET` | Vercel env vars | — (online payments off) |
+| `PAYMOB_API_KEY` | Vercel env var (optional) | — (no automatic recovery) |
+| Integration ID per method | Admin → Settings | empty = method hidden |
+| Payment recheck job | Vercel Cron `/api/cron/payments` daily 06:30 UTC | on |

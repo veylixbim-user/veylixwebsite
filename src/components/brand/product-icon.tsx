@@ -1,4 +1,4 @@
-import { Boxes, Lightbulb, PanelsTopLeft, Route, Tags, Zap, type LucideIcon } from "lucide-react";
+import { Boxes, Cable, Lightbulb, PanelsTopLeft, PlugZap, Rows3, Route, Tags, Zap, type LucideIcon } from "lucide-react";
 import { ART, type ArtId } from "@/lib/art";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,9 @@ export const productIcons: Record<ArtId, LucideIcon> = {
   lighting: Lightbulb,
   tag: Tags,
   bundle: Boxes,
+  wiring: Cable,
+  tray: Rows3,
+  plugin: PlugZap,
 };
 
 const accentClass = {

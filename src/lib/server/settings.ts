@@ -10,7 +10,15 @@ export type PublicSettings = {
   trialsEnabled: boolean;
   instapayNumber: string;
   instapayName: string;
+  /** Optional InstaPay payment link (https://ipn.eg/…) shown as a button and QR code at checkout. */
+  instapayLink: string;
   vatRate: number;
+  /** Offer "InstaPay transfer" (manual check by the admin). */
+  manualPaymentsEnabled: boolean;
+  /** Offer online payment through Paymob (only takes effect once the Paymob keys are set in the hosting environment). */
+  onlinePaymentsEnabled: boolean;
+  /** Paymob integration IDs per payment method (numbers from Paymob → Settings → Payment Integrations; several may be listed, separated by commas). */
+  paymob: { card: string; wallet: string; instapay: string; kiosk: string; installments: string };
 };
 
 export const DEFAULT_SETTINGS: PublicSettings = {
@@ -20,7 +28,11 @@ export const DEFAULT_SETTINGS: PublicSettings = {
   trialsEnabled: true,
   instapayNumber: "01100444395",
   instapayName: "",
+  instapayLink: "",
   vatRate: 14,
+  manualPaymentsEnabled: true,
+  onlinePaymentsEnabled: true,
+  paymob: { card: "", wallet: "", instapay: "", kiosk: "", installments: "" },
 };
 
 async function readAll(): Promise<Map<string, string>> {
@@ -42,7 +54,17 @@ export async function getSettings(): Promise<PublicSettings> {
     trialsEnabled: (map.get("trials_enabled") ?? "1") === "1",
     instapayNumber: map.get("instapay_number") ?? DEFAULT_SETTINGS.instapayNumber,
     instapayName: map.get("instapay_name") ?? DEFAULT_SETTINGS.instapayName,
+    instapayLink: map.get("instapay_link") ?? DEFAULT_SETTINGS.instapayLink,
     vatRate: toInt(map.get("vat_rate"), DEFAULT_SETTINGS.vatRate, 0, 100),
+    manualPaymentsEnabled: (map.get("manual_payments_enabled") ?? "1") === "1",
+    onlinePaymentsEnabled: (map.get("online_payments_enabled") ?? "1") === "1",
+    paymob: {
+      card: map.get("paymob_card_id") ?? "",
+      wallet: map.get("paymob_wallet_id") ?? "",
+      instapay: map.get("paymob_instapay_id") ?? "",
+      kiosk: map.get("paymob_kiosk_id") ?? "",
+      installments: map.get("paymob_installments_ids") ?? "",
+    },
   };
 }
 
