@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { assertAdmin, changePassword, login, logout } from "@/lib/server/auth";
+import { assertAdmin, changePassword, login, logout, revokeAdminSessions } from "@/lib/server/auth";
 import { deleteStoredFile } from "@/lib/server/storage";
 import { productId as newProductId } from "@/lib/server/ids";
 import {
@@ -51,6 +51,13 @@ export async function loginAction(_: ActionState, fd: FormData): Promise<ActionS
 export async function logoutAction() {
   await logout();
   redirect("/admin/login");
+}
+
+/** Ends one signed-in device (by its stored hash) or, with "others", every device except this one. */
+export async function revokeSessionAction(fd: FormData) {
+  await assertAdmin();
+  await revokeAdminSessions(str(fd, "session", 80));
+  revalidatePath("/admin/settings");
 }
 
 export async function changePasswordAction(_: ActionState, fd: FormData): Promise<ActionState> {

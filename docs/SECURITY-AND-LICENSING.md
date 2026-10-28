@@ -266,7 +266,7 @@ keys table shows a **moved N×** badge, and **Reset device** clears the counter 
 | Hardware changes before `hw_limit` | Code (`HW_CHANGE_LIMIT`) | 3 per 30 days |
 | Plugin background check | Plugin | every 6 hours when online |
 | Admin lockout | Code | 5 wrong tries → 15 min per IP |
-| Admin session | Code | 12 hours |
+| Admin session | Code (stored in the database) | 12 hours, 2 hours idle; revocable per device |
 | Reminder emails | Vercel Cron (`vercel.json`) daily 06:00 UTC | 7 / 3 / 1 days before, and in grace |
 | `CRON_SECRET` | Vercel env var (recommended) | — |
 | `ADMIN_MFA_DISABLED` | Vercel env var (break-glass only) | unset |
@@ -298,7 +298,11 @@ keys table shows a **moved N×** badge, and **Reset device** clears the counter 
 
 **Also new in this round.** Every admin sign-in is emailed to the owner and logged; failed sign-ins, lockouts, blocked bots, cross-site requests and suspicious payment events appear in **Admin → Security** (90 days); `/.well-known/security.txt`; `Permissions-Policy`/CORP headers; admin forms no longer wipe what you typed when a value is rejected.
 
-**Not included (yet).** Server-side admin session list/revocation, Cloudflare Turnstile, and Paymob saved-card/subscription callbacks (renewals are one payment per month, by design).
+**Admin sessions (server-side).** The admin cookie is a random 256-bit id (only its SHA-256 is stored in `admin_sessions`), so a session can be ended on the server: **Admin → Settings → Signed-in devices** lists every device (address, browser, last activity), ends one, or signs out all others. Sessions also end after 12 hours, after 2 hours without use, on sign-out, and on password change. Covered by `tests/e2e/5-sessions.mjs`.
+
+**Payment wording follows reality.** Until at least one online method is connected, every page that mentions payment (hero, pricing, FAQ, docs, legal) uses the InstaPay-only wording (`src/i18n/manual-payment-copy.ts`), so the site never promises a method that isn't live.
+
+**Not included (yet).** Cloudflare Turnstile, and Paymob saved-card/subscription callbacks (renewals are one payment per month, by design).
 
 | Setting | Where | Default |
 | --- | --- | --- |

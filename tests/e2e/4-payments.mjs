@@ -76,6 +76,9 @@ admin.on("pageerror", (e) => errors.push(e.message));
 admin.on("dialog", (d) => { errors.push("dialog: " + d.message()); d.dismiss(); });
 
 // ================================================================== settings (UI)
+const home = async () => (await fetch(`${BASE}/en`, { headers: { "x-forwarded-for": ip() } })).text();
+let h = await home();
+ok("PM00", "before Paymob methods are set up, the site only promises InstaPay (no card/wallet wording)", h.includes("Pay with InstaPay") && !h.includes("Card, wallet or InstaPay"));
 await admin.goto(`${BASE}/admin/settings`);
 ok("PM01a", "Settings page shows the Paymob card as connected in TEST mode", await admin.locator("text=TEST mode").first().isVisible());
 await admin.fill("#paymobCard", "abc");
@@ -99,6 +102,8 @@ ok("PM01", "integration IDs and InstaPay link saved", st.paymob_card_id === "111
 await admin.click('button:has-text("Test the Paymob connection")');
 await admin.waitForSelector("text=Paymob accepted the keys");
 ok("PM01d", "“Test the Paymob connection” creates an unpaid test payment request", (await fake("/__test/intentions")).some((i) => i.body.special_reference.startsWith("TEST-")));
+for (let i = 0; i < 20 && !(h = await home()).includes("Card, wallet or InstaPay"); i++) await sleep(500);
+ok("PM00b", "once a method is connected, the site advertises cards and wallets", h.includes("Card, wallet or InstaPay"));
 
 // ================================================================== the storefront checkout
 const cust = await browser.newContext({ viewport: { width: 1280, height: 900 }, extraHTTPHeaders: { "x-forwarded-for": ip() } });

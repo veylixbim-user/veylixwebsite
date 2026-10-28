@@ -13,9 +13,12 @@ import { mfaBypassed, mfaEnabled, recoveryCodesLeft } from "@/lib/server/totp";
 import { mailProvider } from "@/lib/server/mail";
 import { CONTACT_EMAIL } from "@/lib/site";
 import { CopyButton } from "@/components/admin/copy-button";
+import { listAdminSessions } from "@/lib/server/auth";
+import { revokeSessionAction } from "@/app/admin/actions";
+import { Button } from "@/components/ui/button";
 
 export default async function SettingsPage() {
-  const [settings, keys, mfaOn, recoveryLeft] = await Promise.all([getSettings(), publicKeyFormats(), mfaEnabled(), recoveryCodesLeft()]);
+  const [settings, keys, mfaOn, recoveryLeft, sessions] = await Promise.all([getSettings(), publicKeyFormats(), mfaEnabled(), recoveryCodesLeft(), listAdminSessions()]);
   const provider = mailProvider();
   const env = paymobEnv();
   const avail = methodAvailability(settings);
@@ -139,6 +142,44 @@ export default async function SettingsPage() {
           <div className="mt-3">
             <MfaSettings enabled={mfaOn} bypassed={mfaBypassed()} recoveryLeft={recoveryLeft} />
           </div>
+        </Card>
+
+        <Card>
+          <h2 id="sessions" className="scroll-mt-24 font-semibold">
+            Signed-in devices
+          </h2>
+          <p className="mt-1 text-sm text-muted">Every device signed in to this admin panel. Sessions end after 12 hours, or after 2 hours without use. Don&apos;t recognise one? End it, then change your password.</p>
+          <ul className="mt-4 grid gap-2">
+            {sessions.map((s) => (
+              <li key={s.key} className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-bg-elevated p-3 text-sm">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate">
+                    {s.agent || "Unknown browser"}{" "}
+                    {s.current ? <span className="ms-1 rounded-full bg-[color-mix(in_oklab,var(--success)_14%,transparent)] px-2 py-0.5 text-[11px] text-success">this device</span> : null}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {s.ip ?? "—"} · signed in {s.createdAt.slice(0, 16).replace("T", " ")} UTC · last active {s.lastSeenAt.slice(0, 16).replace("T", " ")} UTC
+                  </p>
+                </div>
+                {s.current ? null : (
+                  <form action={revokeSessionAction}>
+                    <input type="hidden" name="session" value={s.key} />
+                    <Button type="submit" size="sm" variant="ghost" className="text-danger">
+                      End session
+                    </Button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+          {sessions.length > 1 ? (
+            <form action={revokeSessionAction} className="mt-3">
+              <input type="hidden" name="session" value="others" />
+              <Button type="submit" size="sm" variant="secondary">
+                Sign out all other devices
+              </Button>
+            </form>
+          ) : null}
         </Card>
 
         <Card>
